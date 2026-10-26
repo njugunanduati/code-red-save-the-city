@@ -3,11 +3,25 @@ import secrets
 import string
 from datetime import datetime, timezone
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import socketio
 
 api = FastAPI(title="Code Red API")
-sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins=[])
+api.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins=[
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+])
 app = socketio.ASGIApp(sio, other_asgi_app=api)
 rooms = {}
 connections = {}
