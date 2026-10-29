@@ -1030,6 +1030,63 @@ function SquadRadio({
     </section>
   );
 }
+function RoomCode({ code }: { code: string }) {
+  const [status, setStatus] = useState<"idle" | "copied" | "manual">("idle");
+  const manual = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (status === "manual") {
+      manual.current?.focus();
+      manual.current?.select();
+    }
+    if (status !== "copied") return;
+    const timer = setTimeout(() => setStatus("idle"), 2500);
+    return () => clearTimeout(timer);
+  }, [status]);
+  const copy = async () => {
+    try {
+      if (!navigator.clipboard) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(code);
+      setStatus("copied");
+    } catch {
+      setStatus("manual");
+      manual.current?.focus();
+      manual.current?.select();
+    }
+  };
+  return (
+    <div className="room-code-share">
+      <div className="eyebrow">ROOM CODE</div>
+      <div className="room-code-row">
+        <h2 className="code">{code}</h2>
+        <button
+          type="button"
+          className="copy-code"
+          onClick={copy}
+          aria-label="Copy room code"
+        >
+          {status === "copied" ? "✓ Copied!" : "Copy code"}
+        </button>
+      </div>
+      <span className="copy-feedback" role="status">
+        {status === "copied"
+          ? "Room code copied. Share it with your squad."
+          : ""}
+      </span>
+      {status === "manual" && (
+        <label className="manual-copy">
+          Clipboard unavailable. Copy the selected code:
+          <input
+            ref={manual}
+            value={code}
+            readOnly
+            aria-label="Room code for manual copying"
+            onFocus={(event) => event.currentTarget.select()}
+          />
+        </label>
+      )}
+    </div>
+  );
+}
 function App() {
   const [name, setName] = useState(""),
     [code, setCode] = useState(""),
@@ -1163,8 +1220,7 @@ function App() {
           </>
         ) : (
           <>
-            <div className="eyebrow">ROOM CODE</div>
-            <h2 className="code">{room.code}</h2>
+            <RoomCode key={room.code} code={room.code} />
             <h3>Squad ({room.players.length}/6)</h3>
             {room.players.map((p) => (
               <div className="player" key={p.id}>
