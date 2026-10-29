@@ -84,6 +84,209 @@ const districts = [
     icon: "◉",
   },
 ];
+// Orthographic isometric projection; height stays vertical on screen.
+function project(x: number, y: number, z = 0) {
+  return { x: 360 + (x - y) * 0.54, y: 105 + (x + y) * 0.31 - z };
+}
+function face(points: number[][]) {
+  return points
+    .map(([x, y, z = 0]) => {
+      const p = project(x, y, z);
+      return `${p.x},${p.y}`;
+    })
+    .join(" ");
+}
+function CityBuilding({
+  building: b,
+  active,
+}: {
+  building: (typeof districts)[number];
+  active: boolean;
+}) {
+  const { x, y, w, h, color } = b,
+    d = 85;
+  const roof = project(x + w / 2, y + d / 2, h);
+  const label = project(x + w / 2, y + d / 2, h + 36);
+  return (
+    <g>
+      <polygon
+        points={face([
+          [x + 10, y + 10],
+          [x + w + 60, y + 10],
+          [x + w + 60, y + d + 45],
+          [x + 10, y + d + 45],
+        ])}
+        fill="#000"
+        opacity=".24"
+      />
+      <polygon
+        points={face([
+          [x - 10, y - 10],
+          [x + w + 10, y - 10],
+          [x + w + 10, y + d + 10],
+          [x - 10, y + d + 10],
+        ])}
+        fill="#344958"
+        stroke="#577180"
+        strokeWidth="1"
+      />
+      {active && (
+        <polygon
+          className="emergency-ring"
+          points={face([
+            [x - 17, y - 17],
+            [x + w + 17, y - 17],
+            [x + w + 17, y + d + 17],
+            [x - 17, y + d + 17],
+          ])}
+          fill="none"
+          stroke="#ff776a"
+          strokeWidth="3"
+        />
+      )}
+      <polygon
+        points={face([
+          [x, y + d],
+          [x + w, y + d],
+          [x + w, y + d, h],
+          [x, y + d, h],
+        ])}
+        fill="url(#wall-front)"
+        stroke="#517082"
+        strokeWidth=".7"
+      />
+      <polygon
+        points={face([
+          [x + w, y],
+          [x + w, y + d],
+          [x + w, y + d, h],
+          [x + w, y, h],
+        ])}
+        fill="url(#wall-side)"
+        stroke="#354e60"
+        strokeWidth=".7"
+      />
+      {[0, 1, 2].map((row) =>
+        [0, 1, 2, 3].map((col) => (
+          <polygon
+            key={`${row}:${col}`}
+            points={face([
+              [x + 12 + col * 29, y + d + 0.5, 18 + row * 25],
+              [x + 25 + col * 29, y + d + 0.5, 18 + row * 25],
+              [x + 25 + col * 29, y + d + 0.5, 29 + row * 25],
+              [x + 12 + col * 29, y + d + 0.5, 29 + row * 25],
+            ])}
+            fill={row * 25 + 29 < h - 5 ? color : "transparent"}
+            opacity={col % 3 === 0 ? 0.3 : 0.8}
+          />
+        )),
+      )}
+      {[0, 1, 2].map((col) => (
+        <polygon
+          key={col}
+          points={face([
+            [x + w + 0.5, y + 12 + col * 23, 25],
+            [x + w + 0.5, y + 24 + col * 23, 25],
+            [x + w + 0.5, y + 24 + col * 23, 40],
+            [x + w + 0.5, y + 12 + col * 23, 40],
+          ])}
+          fill={color}
+          opacity=".35"
+        />
+      ))}
+      <polygon
+        points={face([
+          [x, y, h],
+          [x + w, y, h],
+          [x + w, y + d, h],
+          [x, y + d, h],
+        ])}
+        fill="url(#roof-light)"
+        stroke="#8499a3"
+        strokeWidth="1"
+      />
+      <polygon
+        points={face([
+          [x + 7, y + 7, h + 1],
+          [x + w - 7, y + 7, h + 1],
+          [x + w - 7, y + d - 7, h + 1],
+          [x + 7, y + d - 7, h + 1],
+        ])}
+        fill="#20394b"
+        stroke={color}
+        strokeOpacity=".5"
+      />
+      <polygon
+        points={face([
+          [x + 14, y + 12, h + 1],
+          [x + 43, y + 12, h + 1],
+          [x + 43, y + 36, h + 1],
+          [x + 14, y + 36, h + 1],
+        ])}
+        fill="#0e2635"
+      />
+      <polygon
+        points={face([
+          [x + 14, y + 12, h + 10],
+          [x + 43, y + 12, h + 10],
+          [x + 43, y + 36, h + 10],
+          [x + 14, y + 36, h + 10],
+        ])}
+        fill="#69818c"
+      />
+      <polygon
+        points={face([
+          [x + 43, y + 12, h + 1],
+          [x + 43, y + 36, h + 1],
+          [x + 43, y + 36, h + 10],
+          [x + 43, y + 12, h + 10],
+        ])}
+        fill="#3b5364"
+      />
+      <ellipse
+        cx={roof.x + 15}
+        cy={roof.y + 6}
+        rx="19"
+        ry="10"
+        fill={color}
+        opacity=".15"
+      />
+      <text
+        x={roof.x + 15}
+        y={roof.y + 10}
+        textAnchor="middle"
+        fill={color}
+        fontSize="27"
+        fontWeight="bold"
+      >
+        {b.icon}
+      </text>
+      <path d={`M${label.x} ${label.y + 8}v16`} stroke={color} opacity=".5" />
+      <text
+        x={label.x}
+        y={label.y}
+        textAnchor="middle"
+        fill={color}
+        fontSize="9"
+        fontWeight="bold"
+        letterSpacing=".7"
+      >
+        {b.name}
+      </text>
+      <polygon
+        points={face([
+          [x + 50, y + d + 0.7, 0],
+          [x + 73, y + d + 0.7, 0],
+          [x + 73, y + d + 0.7, 24],
+          [x + 50, y + d + 0.7, 24],
+        ])}
+        fill="#102839"
+        stroke={color}
+        strokeWidth=".8"
+      />
+    </g>
+  );
+}
 function SquadActor({
   player,
   index,
@@ -108,18 +311,27 @@ function SquadActor({
     const timer = setTimeout(() => setWalking(false), 5000);
     return () => clearTimeout(timer);
   }, [dispatched]);
-  const home = 100 + index * 80;
-  const x = destination.x + 15 + (index % 3) * 60;
-  const y = destination.y + destination.h + 25 + Math.floor(index / 3) * 40;
+  const home = project(100 + index * 80, 555);
+  const scene = project(
+    destination.x + 15 + (index % 3) * 48,
+    destination.y + 110 + Math.floor(index / 3) * 35,
+  );
+  const roadStart = project(355, 555),
+    roadEnd = project(355, destination.y + 110 + Math.floor(index / 3) * 35);
   const color = districts[index % 4].color;
   return (
     <g
       className={`city-actor ${dispatched ? "actor-deployed" : "actor-home"}`}
       style={
         {
-          "--home-x": `${home}px`,
-          "--scene-x": `${x}px`,
-          "--scene-y": `${y}px`,
+          "--home-x": `${home.x}px`,
+          "--home-y": `${home.y}px`,
+          "--road-x": `${roadStart.x}px`,
+          "--road-y": `${roadStart.y}px`,
+          "--turn-x": `${roadEnd.x}px`,
+          "--turn-y": `${roadEnd.y}px`,
+          "--scene-x": `${scene.x}px`,
+          "--scene-y": `${scene.y}px`,
           opacity: player.online ? 1 : 0.35,
         } as React.CSSProperties
       }
@@ -145,6 +357,7 @@ function SquadActor({
           strokeWidth="3"
         />
         <rect x="-7" y="-6" width="14" height="16" rx="5" fill={color} />
+        <path d="M2-5h4v13H2Z" fill="#000" opacity=".2" />
         <circle cy="-11" r="6" fill="#e6bf9c" />
         <path d="M-7-13q7-10 14 0" fill={color} />
       </g>
@@ -244,6 +457,26 @@ function CityView({ room }: { room: Room }) {
         aria-label={`City map. ${m ? m.crisis.title : "Squad at dispatch headquarters"}`}
       >
         <defs>
+          <linearGradient id="wall-front" x2="0" y2="1">
+            <stop stopColor="#43627a" />
+            <stop offset="1" stopColor="#1a3449" />
+          </linearGradient>
+          <linearGradient id="wall-side">
+            <stop stopColor="#142839" />
+            <stop offset="1" stopColor="#30485d" />
+          </linearGradient>
+          <linearGradient id="roof-light" x2="1" y2="1">
+            <stop stopColor="#94aab1" />
+            <stop offset="1" stopColor="#4e687b" />
+          </linearGradient>
+          <linearGradient id="ground-light" x2="0" y2="1">
+            <stop stopColor="#2a4b50" />
+            <stop offset="1" stopColor="#172f3f" />
+          </linearGradient>
+          <radialGradient id="tree-light" cx=".3" cy=".2">
+            <stop stopColor="#62977b" />
+            <stop offset="1" stopColor="#234c46" />
+          </radialGradient>
           <pattern
             id="grid"
             width="32"
@@ -265,120 +498,248 @@ function CityView({ room }: { room: Room }) {
             <feDropShadow dx="0" dy="12" stdDeviation="8" floodOpacity=".4" />
           </filter>
         </defs>
-        <rect width="720" height="580" fill="url(#grid)" />
-        <ellipse cx="360" cy="270" rx="350" ry="270" fill="url(#glow)" />
-        <path d="M0 310H720 M355 60V580" stroke="#142537" strokeWidth="62" />
-        <path
-          d="M0 310H720 M355 60V580"
-          stroke="#5c6c72"
-          strokeWidth="2"
-          strokeDasharray="12 14"
+        <ellipse
+          cx="360"
+          cy="380"
+          rx="300"
+          ry="130"
+          fill="#000"
+          opacity=".3"
+          filter="url(#shadow)"
         />
-        <path
-          d="M0 345H720 M390 60V580"
-          stroke="#426471"
-          strokeOpacity=".4"
-          fill="none"
+        <polygon
+          points={face([
+            [0, 0, -20],
+            [650, 0, -20],
+            [650, 650, -20],
+            [0, 650, -20],
+          ])}
+          fill="#0b1b29"
+          stroke="#345163"
         />
-        {[
-          [65, 130],
-          [305, 130],
-          [630, 145],
-          [640, 410],
-          [70, 445],
-          [305, 475],
-          [620, 505],
-        ].map(([x, y], i) => (
-          <g key={i}>
-            <ellipse cx={x} cy={y + 12} rx="18" ry="7" fill="#07131c" />
-            <path d={`M${x} ${y}v18`} stroke="#698071" strokeWidth="4" />
-            <circle cx={x} cy={y - 6} r="16" fill="#23554e" />
-            <circle cx={x - 4} cy={y - 12} r="10" fill="#337365" />
+        <polygon
+          points={face([
+            [0, 650, 0],
+            [650, 650, 0],
+            [650, 650, -20],
+            [0, 650, -20],
+          ])}
+          fill="#203b4c"
+        />
+        <polygon
+          points={face([
+            [650, 0, 0],
+            [650, 650, 0],
+            [650, 650, -20],
+            [650, 0, -20],
+          ])}
+          fill="#102838"
+        />
+        <polygon
+          points={face([
+            [0, 0],
+            [650, 0],
+            [650, 650],
+            [0, 650],
+          ])}
+          fill="url(#ground-light)"
+          stroke="#496675"
+        />
+        {[0, 100, 200, 300, 400, 500, 600].map((n) => (
+          <g key={n} opacity=".12">
+            <polyline
+              points={face([
+                [n, 0],
+                [n, 650],
+              ])}
+              stroke="#9abac4"
+            />
+            <polyline
+              points={face([
+                [0, n],
+                [650, n],
+              ])}
+              stroke="#9abac4"
+            />
           </g>
         ))}
-        {districts.map((b, i) => (
-          <g key={b.name} filter="url(#shadow)">
-            {active === i && m?.phase !== "complete" && (
+        <polygon
+          points={face([
+            [315, 0],
+            [395, 0],
+            [395, 650],
+            [315, 650],
+          ])}
+          fill="#657781"
+        />
+        <polygon
+          points={face([
+            [0, 270],
+            [650, 270],
+            [650, 350],
+            [0, 350],
+          ])}
+          fill="#657781"
+        />
+        <polygon
+          points={face([
+            [325, 0],
+            [385, 0],
+            [385, 650],
+            [325, 650],
+          ])}
+          fill="#182c3c"
+        />
+        <polygon
+          points={face([
+            [0, 280],
+            [650, 280],
+            [650, 340],
+            [0, 340],
+          ])}
+          fill="#182c3c"
+        />
+        <polyline
+          points={face([
+            [355, 0],
+            [355, 650],
+          ])}
+          stroke="#b2baa9"
+          strokeWidth="1.5"
+          strokeDasharray="7 10"
+        />
+        <polyline
+          points={face([
+            [0, 310],
+            [650, 310],
+          ])}
+          stroke="#b2baa9"
+          strokeWidth="1.5"
+          strokeDasharray="7 10"
+        />
+        {[0, 1, 2, 3].map((i) => (
+          <g key={i}>
+            <polygon
+              points={face([
+                [290 + i * 5, 282],
+                [293 + i * 5, 282],
+                [293 + i * 5, 338],
+                [290 + i * 5, 338],
+              ])}
+              fill="#a0adb0"
+            />
+            <polygon
+              points={face([
+                [327, 360 + i * 5],
+                [383, 360 + i * 5],
+                [383, 363 + i * 5],
+                [327, 363 + i * 5],
+              ])}
+              fill="#a0adb0"
+            />
+          </g>
+        ))}
+        {[
+          [70, 100],
+          [300, 80],
+          [590, 150],
+          [620, 420],
+          [70, 470],
+          [280, 490],
+          [610, 600],
+        ].map(([x, y], i) => {
+          const base = project(x, y),
+            top = project(x, y, 30);
+          return (
+            <g key={i}>
               <ellipse
-                className="emergency-ring"
-                cx={b.x + b.w / 2}
-                cy={b.y + 25}
-                rx="102"
-                ry="55"
+                cx={base.x + 8}
+                cy={base.y + 4}
+                rx="18"
+                ry="7"
+                fill="#0004"
+              />
+              <path
+                d={`M${base.x} ${base.y}V${top.y}`}
+                stroke="#6b6654"
+                strokeWidth="4"
+              />
+              <ellipse
+                cx={top.x}
+                cy={top.y}
+                rx="15"
+                ry="20"
+                fill="url(#tree-light)"
+              />
+              <ellipse
+                cx={top.x - 4}
+                cy={top.y - 7}
+                rx="8"
+                ry="11"
+                fill="#75ab80"
+                opacity=".4"
+              />
+            </g>
+          );
+        })}
+        {[0, 1].map((i) => (
+          <CityBuilding
+            key={i}
+            building={districts[i]}
+            active={active === i && m?.phase !== "complete"}
+          />
+        ))}
+        {[
+          [305, 230],
+          [405, 410],
+          [305, 560],
+        ].map(([x, y], i) => {
+          const p = project(x, y);
+          return (
+            <g key={i}>
+              <ellipse cx={p.x} cy={p.y} rx="14" ry="6" fill="#f2cf7418" />
+              <path
+                d={`M${p.x} ${p.y}v-33h8`}
                 fill="none"
-                stroke="#ff7666"
+                stroke="#7b8e97"
                 strokeWidth="2"
               />
-            )}
-            <path
-              d={`M${b.x} ${b.y}l18 -18h${b.w}v${b.h}l-18 18Z`}
-              fill="#2a4256"
-            />
-            <rect
-              x={b.x}
-              y={b.y}
-              width={b.w}
-              height={b.h}
-              rx="3"
-              fill="#1d3447"
-              stroke={active === i ? "#ff7666" : b.color}
-              strokeOpacity=".7"
-            />
-            <path d={`M${b.x} ${b.y}l18 -18h${b.w}l-18 18Z`} fill="#425c6c" />
-            <rect
-              x={b.x + 12}
-              y={b.y + 14}
-              width={b.w - 24}
-              height="6"
-              rx="2"
-              fill={b.color}
-            />
-            {Array.from({ length: 8 }, (_, n) => (
-              <rect
-                key={n}
-                x={b.x + 15 + (n % 4) * 29}
-                y={b.y + 36 + Math.floor(n / 4) * 24}
-                width="12"
-                height="12"
-                rx="1"
-                fill={n % 3 === 0 ? "#365161" : b.color}
-                opacity=".7"
+              <circle cx={p.x + 8} cy={p.y - 33} r="3" fill="#ffe1a0" />
+              <circle
+                cx={p.x + 8}
+                cy={p.y - 33}
+                r="9"
+                fill="#ffd885"
+                opacity=".08"
               />
-            ))}
-            <text
-              x={b.x + b.w / 2}
-              y={b.y - 30}
-              textAnchor="middle"
-              fill={b.color}
-              fontSize="11"
-              letterSpacing="1"
-            >
-              {b.name}
-            </text>
-            <circle
-              cx={b.x + b.w - 12}
-              cy={b.y - 8}
-              r="18"
-              fill="#112334"
-              stroke={b.color}
-            />
-            <text
-              x={b.x + b.w - 12}
-              y={b.y - 2}
-              textAnchor="middle"
-              fill={b.color}
-              fontSize="22"
-            >
-              {b.icon}
-            </text>
-          </g>
-        ))}
-        <g className="ambulance">
-          <rect x="302" y="285" width="36" height="18" rx="4" fill="#dce8e9" />
-          <rect x="327" y="288" width="8" height="8" fill="#54a4bd" />
-          <path d="M312 288v10m-5-5h10" stroke="#f56d64" strokeWidth="3" />
-          <rect x="308" y="282" width="12" height="3" fill="#ff776a" />
+            </g>
+          );
+        })}
+        <g
+          className="iso-ambulance"
+          style={
+            {
+              "--vehicle-x": `${project(360, 310).x}px`,
+              "--vehicle-y": `${project(360, 310).y}px`,
+            } as React.CSSProperties
+          }
+        >
+          <ellipse cy="8" rx="23" ry="8" fill="#0005" />
+          <path d="M-21-6l13-8 30 10-13 9Z" fill="#f0f6f3" />
+          <path d="M-21-6v13l30 11V5Z" fill="#91adb9" />
+          <path d="M9 5l13-9v13L9 18Z" fill="#506f84" />
+          <path d="M-13-1v9m-4-6 8 3" stroke="#ff766a" strokeWidth="3" />
+          <path d="M4-9l8 3-5 4-8-3Z" fill="#ff766a" />
+          <ellipse cx="-13" cy="12" rx="4" ry="5" fill="#0b1b27" />
+          <ellipse cx="5" cy="18" rx="4" ry="5" fill="#0b1b27" />
         </g>
+        {[3, 2].map((i) => (
+          <CityBuilding
+            key={i}
+            building={districts[i]}
+            active={active === i && m?.phase !== "complete"}
+          />
+        ))}
         {room.players.map((p, i) => (
           <SquadActor
             key={`${p.id}:${m?.id}:${m?.round}`}
