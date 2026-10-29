@@ -1,3 +1,5 @@
+import base64
+import binascii
 import asyncio
 import secrets
 import string
@@ -58,6 +60,25 @@ ROLES = ("engineer", "medic", "security", "dispatcher")
 mission_tasks = {}
 ALPHABET = string.ascii_uppercase + string.digits
 
+AVATARS = ('mint', 'gold', 'blue', 'coral', 'violet', 'rose')
+
+
+def valid_avatar(value):
+    if value in AVATARS:
+        return True
+    if not isinstance(value, str) or len(value) > 24000:
+        return False
+    if not value.startswith('data:image/png;base64,'):
+        return False
+    try:
+        raw = base64.b64decode(value.split(',', 1)[1], validate=True)
+        return (len(raw) >= 24 and raw[:8] == b'\x89PNG\r\n\x1a\n' and
+                raw[12:16] == b'IHDR' and
+                0 < int.from_bytes(raw[16:20], 'big') <= 128 and
+                0 < int.from_bytes(raw[20:24], 'big') <= 128)
+    except (ValueError, binascii.Error):
+        return False
+
 class CreateRoom(BaseModel):
     name: str
 
@@ -68,7 +89,7 @@ async def health():
 def public_room(code):
     room = rooms[code]
     return {'code': code, 'status': room['status'], 'players': [
-        {'id': p['id'], 'name': p['name'], 'ready': p['ready'], 'online': p['online'], 'host': p['id'] == room['host'], 'role': p.get('role')}
+        {'id': p['id'], 'name': p['name'], 'ready': p['ready'], 'online': p['online'], 'host': p['id'] == room['host'], 'role': p.get('role'), 'avatar': p.get('avatar', 'mint')}
         for p in room['players'].values()
     ], 'messages': list(room.get('messages', [])), 'missionNumber': room.get('mission_number', 1), 'mission': public_mission(room)}
 
@@ -100,12 +121,15 @@ async def create_room(sid, data):
     name = str((data or {}).get('name', '')).strip()[:24]
     if not name:
         return {'ok': False, 'error': 'Enter a player name'}
+    avatar = data.get('avatar', 'mint')
+    if not valid_avatar(avatar):
+        return {'ok': False, 'error': 'Choose a valid avatar'}
     async with lock:
         code = ''.join(secrets.choice(ALPHABET) for _ in range(6))
         while code in rooms:
             code = ''.join(secrets.choice(ALPHABET) for _ in range(6))
         player_id = secrets.token_urlsafe(18)
-        rooms[code] = {'status': 'lobby', 'host': player_id, 'players': {player_id: {'id': player_id, 'name': name, 'ready': False, 'online': True}}}
+        rooms[code] = {'status': 'lobby', 'host': player_id, 'players': {player_id: {'id': player_id, 'name': name, 'avatar': avatar, 'ready': False, 'online': True}}}
         connections[sid] = (code, player_id)
         await sio.enter_room(sid, code)
         await broadcast(code)
@@ -121,6 +145,9 @@ async def join_room(sid, data):
     name = str((data or {}).get('name', '')).strip()[:24]
     if not name:
         return {'ok': False, 'error': 'Enter a player name'}
+    avatar = data.get('avatar', 'mint')
+    if not valid_avatar(avatar):
+        return {'ok': False, 'error': 'Choose a valid avatar'}
     async with lock:
         room = rooms.get(code)
         if not room or room['status'] != 'lobby':
@@ -128,11 +155,27 @@ async def join_room(sid, data):
         if len(room['players']) >= 6:
             return {'ok': False, 'error': 'Room is full'}
         player_id = secrets.token_urlsafe(18)
-        room['players'][player_id] = {'id': player_id, 'name': name, 'ready': False, 'online': True}
+        room['players'][player_id] = {'id': player_id, 'name': name, 'avatar': avatar, 'ready': False, 'online': True}
         connections[sid] = (code, player_id)
         await sio.enter_room(sid, code)
         await broadcast(code)
         return {'ok': True, 'code': code, 'playerId': player_id}
+
+@sio.on('set_avatar')
+async def set_avatar(sid, data):
+    if not isinstance(data, dict) or not valid_avatar(data.get('avatar')):
+        return {'ok': False, 'error': 'Choose a valid avatar'}
+    async with lock:
+        entry = connections.get(sid)
+        if not entry:
+            return {'ok': False, 'error': 'Not in a room'}
+        code, player_id = entry
+        room = rooms.get(code)
+        if not room or room['status'] != 'lobby':
+            return {'ok': False, 'error': 'Change your avatar in the lobby'}
+        room['players'][player_id]['avatar'] = data['avatar']
+        await broadcast(code)
+        return {'ok': True}
 
 @sio.on('set_ready')
 async def set_ready(sid, data):

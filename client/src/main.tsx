@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { io } from "socket.io-client";
 import "./style.css";
+import { AvatarPicker, AvatarBadge, avatarColors } from "./AvatarPicker";
 import { VictoryCelebration } from "./VictoryCelebration";
 const socketUrl =
   import.meta.env.VITE_SOCKET_URL ||
@@ -16,6 +17,7 @@ type Player = {
   online: boolean;
   host: boolean;
   role?: string;
+  avatar?: string;
 };
 type Result = {
   round: number;
@@ -355,7 +357,7 @@ function SquadActor({
   );
   const roadStart = project(355, 555),
     roadEnd = project(355, destination.y + 110 + Math.floor(index / 3) * 35);
-  const color = districts[index % 4].color;
+  const color = avatarColors[player.avatar || "mint"] || "#3ee0d2";
   const words = (speech || "").replace(/\s+/g, " ").split(" ");
   let firstLine = "";
   while (words.length && (firstLine + " " + words[0]).trim().length <= 26)
@@ -403,7 +405,8 @@ function SquadActor({
         <rect x="-7" y="-6" width="14" height="16" rx="5" fill={color} />
         <path d="M2-5h4v13H2Z" fill="#000" opacity=".2" />
         <circle cy="-11" r="6" fill="#e6bf9c" />
-        <path d="M-7-13q7-10 14 0" fill={color} />
+        {player.avatar?.startsWith("data:image/png;base64,") && <image href={player.avatar} x="-10" y="-23" width="20" height="20" preserveAspectRatio="xMidYMid slice" />}
+        {!player.avatar?.startsWith("data:image/png;base64,") && <path d="M-7-13q7-10 14 0" fill={color} />}
       </g>
       <text y="31" textAnchor="middle" fill="#d9e8f2" fontSize="10">
         {player.name.slice(0, 10)}
@@ -1205,6 +1208,7 @@ function RoomCode({ code }: { code: string }) {
   );
 }
 function App() {
+  const [avatar, setAvatar] = useState("mint");
   const [name, setName] = useState(""),
     [code, setCode] = useState(""),
     [room, setRoom] = useState<Room | null>(null),
@@ -1316,6 +1320,7 @@ function App() {
         {!room ? (
           <>
             <h2>Enter command center</h2>
+            <AvatarPicker value={avatar} onChange={setAvatar} />
             <label>
               Callsign
               <input
@@ -1327,7 +1332,7 @@ function App() {
             </label>
             <button
               disabled={!connected}
-              onClick={() => send("create_room", { name })}
+              onClick={() => send("create_room", { name, avatar })}
             >
               Create mission room
             </button>
@@ -1344,7 +1349,7 @@ function App() {
             <button
               disabled={!connected}
               className="secondary"
-              onClick={() => send("join_room", { name, code })}
+              onClick={() => send("join_room", { name, code, avatar })}
             >
               Join room
             </button>
@@ -1356,7 +1361,7 @@ function App() {
             {room.players.map((p) => (
               <div className="player" key={p.id}>
                 <span>
-                  {p.name} {p.host ? "★" : ""} {p.role}
+                  <AvatarBadge value={p.avatar || "mint"} /> {p.name} {p.host ? "★" : ""} {p.role}
                 </span>
                 <span>
                   {p.online ? (p.ready ? "READY" : "WAITING") : "OFFLINE"}
@@ -1365,6 +1370,7 @@ function App() {
             ))}
             {room.status === "lobby" ? (
               <>
+                <AvatarPicker value={mine?.avatar || "mint"} disabled={!connected} onChange={(value) => send("set_avatar", {avatar: value})} />
                 <p>
                   Mission {room.missionNumber} · Ready up to deploy. Share this
                   code with your teammates.
