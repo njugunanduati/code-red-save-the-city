@@ -84,8 +84,135 @@ const districts = [
     icon: "◉",
   },
 ];
+function SquadActor({
+  player,
+  index,
+  mission,
+  destination,
+  speech,
+}: {
+  player: Player;
+  index: number;
+  mission: Mission | null;
+  destination: (typeof districts)[number];
+  speech?: string;
+}) {
+  const dispatched = !!mission?.submitted.includes(player.id);
+  const [walking, setWalking] = useState(false);
+  useEffect(() => {
+    if (!dispatched) {
+      setWalking(false);
+      return;
+    }
+    setWalking(true);
+    const timer = setTimeout(() => setWalking(false), 5000);
+    return () => clearTimeout(timer);
+  }, [dispatched]);
+  const home = 100 + index * 80;
+  const x = destination.x + 15 + (index % 3) * 60;
+  const y = destination.y + destination.h + 25 + Math.floor(index / 3) * 40;
+  const color = districts[index % 4].color;
+  return (
+    <g
+      className={`city-actor ${dispatched ? "actor-deployed" : "actor-home"}`}
+      style={
+        {
+          "--home-x": `${home}px`,
+          "--scene-x": `${x}px`,
+          "--scene-y": `${y}px`,
+          opacity: player.online ? 1 : 0.35,
+        } as React.CSSProperties
+      }
+    >
+      <ellipse cy="15" rx="10" ry="4" fill="#0008" />
+      <g className={walking ? "actor-walking" : "actor-standing"}>
+        <path
+          className="leg-left"
+          d="M-4 6l-2 9"
+          stroke="#9aaec0"
+          strokeWidth="3"
+        />
+        <path
+          className="leg-right"
+          d="M4 6l2 9"
+          stroke="#9aaec0"
+          strokeWidth="3"
+        />
+        <path
+          className="actor-arms"
+          d="M-7-3l-5 9m19-9 5 9"
+          stroke={color}
+          strokeWidth="3"
+        />
+        <rect x="-7" y="-6" width="14" height="16" rx="5" fill={color} />
+        <circle cy="-11" r="6" fill="#e6bf9c" />
+        <path d="M-7-13q7-10 14 0" fill={color} />
+      </g>
+      <text y="31" textAnchor="middle" fill="#d9e8f2" fontSize="10">
+        {player.name.slice(0, 10)}
+      </text>
+      {speech && (
+        <g className="speech-bubble" aria-hidden="true">
+          <rect
+            x="-82"
+            y="-69"
+            width="164"
+            height="39"
+            rx="9"
+            fill="#e0f5f0"
+            stroke={color}
+          />
+          <path d="M-5-30l5 9 6-9" fill="#e0f5f0" />
+          <text
+            x="0"
+            y="-53"
+            textAnchor="middle"
+            fill="#193c46"
+            fontSize="10"
+            fontWeight="700"
+          >
+            {speech.split("|")[0]}
+          </text>
+          <text x="0" y="-39" textAnchor="middle" fill="#193c46" fontSize="10">
+            {speech.split("|")[1] || ""}
+          </text>
+        </g>
+      )}
+    </g>
+  );
+}
 function CityView({ room }: { room: Room }) {
   const m = room.mission;
+  const [radioTurn, setRadioTurn] = useState(0);
+  const online = room.players.filter((p) => p.online);
+  const radioKey = `${m?.id}:${m?.round}:${m?.phase}:${m?.submitted.join(",")}:${online.map((p) => p.id).join(",")}`;
+  useEffect(() => {
+    setRadioTurn(0);
+    const timer = setInterval(() => setRadioTurn((turn) => turn + 1), 4500);
+    return () => clearInterval(timer);
+  }, [radioKey]);
+  const speaker = online[radioTurn % Math.max(1, online.length)];
+  const teammate = online[(radioTurn + 1) % Math.max(1, online.length)];
+  const latest = m?.history[m.history.length - 1];
+  const callout = !m
+    ? radioTurn % 2 === 0
+      ? "Radio check.|Squad, do you copy?"
+      : "Loud and clear.|Standing by at HQ."
+    : m.phase === "complete"
+      ? m.outcome === "saved"
+        ? "City secured!|Great work, team."
+        : "Regroup at HQ.|We'll try again together."
+      : m.phase === "resolution"
+        ? latest?.success
+          ? "Emergency contained.|Nice teamwork!"
+          : "We need to regroup.|Stay with me, squad."
+        : speaker && m.submitted.includes(speaker.id)
+          ? radioTurn % 2 === 0
+            ? "Orders confirmed.|Team, keep me updated."
+            : "I'm in position.|Stay on the radio."
+          : radioTurn % 2 === 0
+            ? "New emergency.|Team, check your orders."
+            : "Copy that.|Ready when you are.";
   const active = !m
     ? -1
     : ["blackout", "surge", "ransomware"].includes(m.crisis.key)
@@ -252,45 +379,30 @@ function CityView({ room }: { room: Room }) {
           <path d="M312 288v10m-5-5h10" stroke="#f56d64" strokeWidth="3" />
           <rect x="308" y="282" width="12" height="3" fill="#ff776a" />
         </g>
-        {room.players.map((p, i) => {
-          const dispatched = !!m?.submitted.includes(p.id);
-          const x = dispatched
-            ? destination.x + 15 + (i % 3) * 60
-            : 100 + i * 80;
-          const y = dispatched
-            ? destination.y + destination.h + 25 + Math.floor(i / 3) * 45
-            : 500;
-          return (
-            <g
-              key={p.id}
-              className="city-actor"
-              style={{
-                transform: `translate(${x}px, ${y}px)`,
-                opacity: p.online ? 1 : 0.35,
-              }}
-            >
-              <ellipse cy="12" rx="10" ry="4" fill="#0008" />
-              <path d="M-4 6l-2 9m10-9 2 9" stroke="#9aaec0" strokeWidth="3" />
-              <rect
-                x="-7"
-                y="-6"
-                width="14"
-                height="16"
-                rx="5"
-                fill={districts[i % 4].color}
-              />
-              <circle cy="-11" r="6" fill="#e6bf9c" />
-              <path d="M-7-13q7-10 14 0" fill={districts[i % 4].color} />
-              <text y="30" textAnchor="middle" fill="#d9e8f2" fontSize="10">
-                {p.name.slice(0, 10)}
-              </text>
-            </g>
-          );
-        })}
+        {room.players.map((p, i) => (
+          <SquadActor
+            key={`${p.id}:${m?.id}:${m?.round}`}
+            player={p}
+            index={i}
+            mission={m}
+            destination={destination}
+            speech={speaker?.id === p.id ? callout : undefined}
+          />
+        ))}
         <text x="28" y="555" fill="#7194a6" fontSize="10" letterSpacing="2">
           MERIDIAN EMERGENCY RESPONSE NETWORK
         </text>
       </svg>
+      <div className="squad-radio" aria-label="Automatic squad dialogue">
+        <span className="eyebrow">SQUAD RADIO · AUTO CALLOUTS</span>
+        <p role="status" aria-live="polite">
+          <strong>{speaker?.name || "Dispatch"}</strong>
+          {teammate && teammate.id !== speaker?.id
+            ? ` → ${teammate.name}`
+            : " → Squad"}
+          : {callout.replace("|", " ")}
+        </p>
+      </div>
       <div className="city-caption">
         <span className="signal-dot" />
         <p>
