@@ -324,6 +324,8 @@ async def send_message(sid, data):
             return {'ok': False, 'error': 'Join a squad to use the radio'}
         code, player_id = entry
         room = rooms[code]
+        if room['status'] != 'playing':
+            return {'ok': False, 'error': 'Chat is available only during an active mission'}
         player = room['players'][player_id]
         now = time.monotonic()
         if now - player.get('last_message_at', -float('inf')) < 0.6:

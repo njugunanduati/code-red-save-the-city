@@ -900,6 +900,7 @@ function SquadRadio({
   const [draft, setDraft] = useState(""),
     [sending, setSending] = useState(false),
     [error, setError] = useState("");
+  const active = room.status === "playing";
   const log = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
   useEffect(() => {
@@ -907,7 +908,7 @@ function SquadRadio({
       log.current.scrollTop = log.current.scrollHeight;
   }, [room.messages?.length, room.messages?.[room.messages.length - 1]?.id]);
   const transmit = (text: string) => {
-    if (!text.trim() || sending || !connected) return;
+    if (!active || !text.trim() || sending || !connected) return;
     setSending(true);
     setError("");
     socket
@@ -940,7 +941,7 @@ function SquadRadio({
         <span className="signal-dot" />
       </div>
       <p className="note">
-        Coordinate here, then choose your action. The ★ leader is the room host.
+        {active ? "Coordinate here, then choose your action. The ★ leader is the room host." : room.status === "complete" ? "Mission complete. Chat is closed; conversation history remains below." : "Chat opens when the host starts the mission."}
       </p>
       <div
         className="radio-log"
@@ -957,8 +958,7 @@ function SquadRadio({
       >
         {!room.messages?.length && (
           <p className="radio-empty">
-            Your channel is open. Try “Team, do you copy?” or ask your leader
-            what to do.
+            {active ? "Your channel is open. Try “Team, do you copy?” or ask your leader what to do." : "No mission messages yet."}
           </p>
         )}
         {room.messages?.map((message) => (
@@ -996,12 +996,12 @@ function SquadRadio({
           rows={2}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="Copy. What should we do here?"
-          disabled={!connected || sending}
+          disabled={!active || !connected || sending}
         />
         <div className="radio-compose">
           <span>{draft.length}/240</span>
           <button
-            disabled={!connected || sending || !draft.trim()}
+            disabled={!active || !connected || sending || !draft.trim()}
             type="submit"
           >
             {sending ? "Sending…" : "Send message"}
@@ -1010,13 +1010,13 @@ function SquadRadio({
       </form>
       <div className="radio-quick">
         <button
-          disabled={!connected || sending}
+          disabled={!active || !connected || sending}
           onClick={() => setDraft("Copy, loud and clear.")}
         >
           Copy
         </button>
         <button
-          disabled={!connected || sending}
+          disabled={!active || !connected || sending}
           onClick={() => setDraft("What should we do here?")}
         >
           Ask for direction

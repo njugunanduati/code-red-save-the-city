@@ -7,6 +7,7 @@ from test_mission import clean, squad
 async def test_radio_uses_socket_identity_and_room_scope():
     code = await squad()
     outsider = await game.create_room('other', {'name': 'Other squad'})
+    await game.start_game('host')
     result = await game.send_message('1', {'text': ' Copy. What should we do here? ', 'playerId': game.rooms[code]['host'], 'leader': True})
     assert result['ok']
     messages = game.public_room(code)['messages']
@@ -21,6 +22,7 @@ async def test_radio_uses_socket_identity_and_room_scope():
 @pytest.mark.asyncio
 async def test_radio_validates_text_and_membership():
     await squad()
+    await game.start_game('host')
     for data in [None, [], {}, {'text': 4}, {'text': '   '}, {'text': 'x'*241}, {'text': '\x00bad'}]:
         assert not (await game.send_message('host', data))['ok']
     assert not (await game.send_message('unknown', {'text': 'Hello'}))['ok']
@@ -30,12 +32,12 @@ async def test_radio_validates_text_and_membership():
 @pytest.mark.asyncio
 async def test_radio_retains_bounded_history_through_reset():
     code = await squad()
+    await game.start_game('host')
     for index in range(55):
         game.rooms[code]['players'][game.rooms[code]['host']]['last_message_at'] = -100
         assert (await game.send_message('host', {'text': str(index)}))['ok']
     assert len(game.public_room(code)['messages']) == 50
     assert game.public_room(code)['messages'][0]['text'] == '5'
-    await game.start_game('host')
     game.rooms[code]['status'] = 'complete'
     game.rooms[code]['mission']['outcome'] = 'saved'
     await game.reset_game('host', {'mode': 'next'})
@@ -54,3 +56,19 @@ async def test_server_lifespan_owns_lock_and_cleans_tasks():
         game.mission_tasks['test'] = task
     assert task.cancelled()
     assert game.mission_tasks == {}
+
+
+@pytest.mark.asyncio
+async def test_chat_only_during_active_mission():
+    code = await squad()
+    assert not (await game.send_message('host', {'text': 'lobby'}))['ok']
+    assert game.public_room(code)['messages'] == []
+    await game.start_game('host')
+    assert (await game.send_message('host', {'text': 'mission'}))['ok']
+    game.rooms[code]['mission']['phase'] = 'resolution'
+    assert (await game.send_message('1', {'text': 'between rounds'}))['ok']
+    game.rooms[code]['status'] = 'complete'
+    assert not (await game.send_message('host', {'text': 'after mission'}))['ok']
+    await game.reset_game('host', {'mode': 'restart'})
+    assert not (await game.send_message('host', {'text': 'reset lobby'}))['ok']
+    assert len(game.public_room(code)['messages']) == 2

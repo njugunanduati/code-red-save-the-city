@@ -36,15 +36,16 @@ async def test_two_clients_complete_mission(monkeypatch):
         await clients[1].call('join_room', {'name': 'Medic', 'code': created['code']})
         for client in clients:
             await client.call('set_ready', {'ready': True})
+        assert not (await clients[0].call('send_message', {'text': 'Before deployment'}))['ok']
+        assert not (await clients[1].call('start_game', {}))['ok']
+        assert (await clients[0].call('start_game', {}))['ok']
+        await wait_for(lambda: all(s[-1]['status'] == 'playing' for s in states))
+        assert states[0][-1]['mission']['deadline'] == states[1][-1]['mission']['deadline']
         assert (await clients[0].call('send_message', {'text': 'Team, do you copy?'}))['ok']
         assert (await clients[1].call('send_message', {'text': 'Copy. What should we do here?'}))['ok']
         await wait_for(lambda: all(len(s[-1]['messages']) == 2 for s in states))
         assert states[0][-1]['messages'] == states[1][-1]['messages']
         assert states[1][-1]['messages'][0]['leader'] is True
-        assert not (await clients[1].call('start_game', {}))['ok']
-        assert (await clients[0].call('start_game', {}))['ok']
-        await wait_for(lambda: all(s[-1]['status'] == 'playing' for s in states))
-        assert states[0][-1]['mission']['deadline'] == states[1][-1]['mission']['deadline']
         for round_number in range(1, 6):
             await wait_for(lambda: all(s[-1]['mission']['round'] == round_number and
                                       s[-1]['mission']['phase'] == 'action' for s in states))
@@ -52,6 +53,7 @@ async def test_two_clients_complete_mission(monkeypatch):
                 assert (await client.call('submit_action', {'round': round_number, 'kind': 'respond', 'missionId': states[0][-1]['mission']['id']}))['ok']
         await wait_for(lambda: all(s[-1]['status'] == 'complete' for s in states))
         assert states[0][-1]['mission']['history'] == states[1][-1]['mission']['history']
+        assert not (await clients[0].call('send_message', {'text': 'Mission ended'}))['ok']
         assert len(states[0][-1]['mission']['history']) == 5
         assert states[0][-1]['mission']['outcome'] == 'saved'
         old_id = states[0][-1]['mission']['id']
