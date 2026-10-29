@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest>=8,<9
+pytest-asyncio>=1,<2
+aiohttp>=3.10,<4

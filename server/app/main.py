@@ -1,32 +1,83 @@
+import base64
+import binascii
 import asyncio
 import secrets
 import string
-from datetime import datetime, timezone
+import os
+from urllib.parse import urlsplit
+from dataclasses import asdict
+from contextlib import asynccontextmanager
+import time
+from .game_engine import CRISES, resolve
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import socketio
 
-api = FastAPI(title="Code Red API")
+@asynccontextmanager
+async def lifespan(api):
+    global lock
+    # Python 3.9 locks can bind to the loop in which they are constructed.
+    lock = asyncio.Lock()
+    try:
+        yield
+    finally:
+        tasks = list(mission_tasks.values())
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        mission_tasks.clear()
+
+
+def configured_origins(value):
+    origins = [origin.strip().rstrip('/') for origin in value.split(',') if origin.strip()]
+    if not origins:
+        raise ValueError('ALLOWED_ORIGINS must list at least one frontend origin')
+    for origin in origins:
+        parsed = urlsplit(origin)
+        if (parsed.scheme not in ('http', 'https') or not parsed.netloc or
+                '*' in origin or parsed.path or parsed.query or parsed.fragment or parsed.username):
+            raise ValueError('ALLOWED_ORIGINS must contain exact http(s) origins, without paths or wildcards')
+    return origins
+
+
+ALLOWED_ORIGINS = configured_origins(os.environ.get(
+    'ALLOWED_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173'))
+api = FastAPI(title="Code Red API", lifespan=lifespan)
 api.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
-sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins=[
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-])
+sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins=ALLOWED_ORIGINS)
 app = socketio.ASGIApp(sio, other_asgi_app=api)
 rooms = {}
 connections = {}
 lock = asyncio.Lock()
+ROUND_SECONDS = 45
+RESULT_SECONDS = 5
+TOTAL_ROUNDS = 5
+ROLES = ("engineer", "medic", "security", "dispatcher")
+mission_tasks = {}
 ALPHABET = string.ascii_uppercase + string.digits
+
+AVATARS = ('mint', 'gold', 'blue', 'coral', 'violet', 'rose')
+
+
+def valid_avatar(value):
+    if value in AVATARS:
+        return True
+    if not isinstance(value, str) or len(value) > 24000:
+        return False
+    if not value.startswith('data:image/png;base64,'):
+        return False
+    try:
+        raw = base64.b64decode(value.split(',', 1)[1], validate=True)
+        return (len(raw) >= 24 and raw[:8] == b'\x89PNG\r\n\x1a\n' and
+                raw[12:16] == b'IHDR' and
+                0 < int.from_bytes(raw[16:20], 'big') <= 128 and
+                0 < int.from_bytes(raw[20:24], 'big') <= 128)
+    except (ValueError, binascii.Error):
+        return False
 
 class CreateRoom(BaseModel):
     name: str
@@ -38,9 +89,9 @@ async def health():
 def public_room(code):
     room = rooms[code]
     return {'code': code, 'status': room['status'], 'players': [
-        {'id': p['id'], 'name': p['name'], 'ready': p['ready'], 'online': p['online'], 'host': p['id'] == room['host']}
+        {'id': p['id'], 'name': p['name'], 'ready': p['ready'], 'online': p['online'], 'host': p['id'] == room['host'], 'role': p.get('role'), 'avatar': p.get('avatar', 'mint')}
         for p in room['players'].values()
-    ]}
+    ], 'messages': list(room.get('messages', [])), 'missionNumber': room.get('mission_number', 1), 'mission': public_mission(room)}
 
 async def broadcast(code):
     await sio.emit('room_state', public_room(code), room=code)
@@ -58,19 +109,27 @@ async def disconnect(sid):
         code, player_id = entry
         if code in rooms and player_id in rooms[code]['players']:
             rooms[code]['players'][player_id]['online'] = False
+            rooms[code]['players'][player_id]['ready'] = False
             await broadcast(code)
 
 @sio.on('create_room')
 async def create_room(sid, data):
+    if not isinstance(data, dict):
+        return {'ok': False, 'error': 'Invalid payload'}
+    if sid in connections:
+        return {'ok': False, 'error': 'Already in a room'}
     name = str((data or {}).get('name', '')).strip()[:24]
     if not name:
         return {'ok': False, 'error': 'Enter a player name'}
+    avatar = data.get('avatar', 'mint')
+    if not valid_avatar(avatar):
+        return {'ok': False, 'error': 'Choose a valid avatar'}
     async with lock:
         code = ''.join(secrets.choice(ALPHABET) for _ in range(6))
         while code in rooms:
             code = ''.join(secrets.choice(ALPHABET) for _ in range(6))
         player_id = secrets.token_urlsafe(18)
-        rooms[code] = {'status': 'lobby', 'host': player_id, 'players': {player_id: {'id': player_id, 'name': name, 'ready': False, 'online': True}}}
+        rooms[code] = {'status': 'lobby', 'host': player_id, 'players': {player_id: {'id': player_id, 'name': name, 'avatar': avatar, 'ready': False, 'online': True}}}
         connections[sid] = (code, player_id)
         await sio.enter_room(sid, code)
         await broadcast(code)
@@ -78,10 +137,17 @@ async def create_room(sid, data):
 
 @sio.on('join_room')
 async def join_room(sid, data):
+    if not isinstance(data, dict):
+        return {'ok': False, 'error': 'Invalid payload'}
+    if sid in connections:
+        return {'ok': False, 'error': 'Already in a room'}
     code = str((data or {}).get('code', '')).upper().strip()
     name = str((data or {}).get('name', '')).strip()[:24]
     if not name:
         return {'ok': False, 'error': 'Enter a player name'}
+    avatar = data.get('avatar', 'mint')
+    if not valid_avatar(avatar):
+        return {'ok': False, 'error': 'Choose a valid avatar'}
     async with lock:
         room = rooms.get(code)
         if not room or room['status'] != 'lobby':
@@ -89,14 +155,32 @@ async def join_room(sid, data):
         if len(room['players']) >= 6:
             return {'ok': False, 'error': 'Room is full'}
         player_id = secrets.token_urlsafe(18)
-        room['players'][player_id] = {'id': player_id, 'name': name, 'ready': False, 'online': True}
+        room['players'][player_id] = {'id': player_id, 'name': name, 'avatar': avatar, 'ready': False, 'online': True}
         connections[sid] = (code, player_id)
         await sio.enter_room(sid, code)
         await broadcast(code)
         return {'ok': True, 'code': code, 'playerId': player_id}
 
+@sio.on('set_avatar')
+async def set_avatar(sid, data):
+    if not isinstance(data, dict) or not valid_avatar(data.get('avatar')):
+        return {'ok': False, 'error': 'Choose a valid avatar'}
+    async with lock:
+        entry = connections.get(sid)
+        if not entry:
+            return {'ok': False, 'error': 'Not in a room'}
+        code, player_id = entry
+        room = rooms.get(code)
+        if not room or room['status'] != 'lobby':
+            return {'ok': False, 'error': 'Change your avatar in the lobby'}
+        room['players'][player_id]['avatar'] = data['avatar']
+        await broadcast(code)
+        return {'ok': True}
+
 @sio.on('set_ready')
 async def set_ready(sid, data):
+    if not isinstance(data, dict):
+        return {'ok': False, 'error': 'Invalid payload'}
     async with lock:
         entry = connections.get(sid)
         if not entry:
@@ -108,3 +192,201 @@ async def set_ready(sid, data):
         room['players'][player_id]['ready'] = bool((data or {}).get('ready'))
         await broadcast(code)
         return {'ok': True}
+
+
+def public_mission(room):
+    mission = room.get('mission')
+    if not mission:
+        return None
+    return {
+        'id': mission['id'], 'number': room.get('mission_number', 1), 'round': mission['round'], 'totalRounds': TOTAL_ROUNDS,
+        'phase': mission['phase'], 'crisis': asdict(mission_crisis(room)),
+        'deadline': mission['deadline'], 'serverTime': time.time(),
+        'resources': dict(mission['resources']),
+        'submitted': list(mission['actions']), 'history': list(mission['history']),
+        'outcome': mission.get('outcome'),
+    }
+
+
+def open_round(mission):
+    mission['phase'] = 'action'
+    mission['actions'] = {}
+    mission['deadline'] = time.time() + ROUND_SECONDS
+    mission['expires'] = time.monotonic() + ROUND_SECONDS
+
+
+async def finish_round(code):
+    room = rooms[code]
+    mission = room['mission']
+    if mission['phase'] != 'action':
+        return
+    result = resolve(mission_crisis(room), room['players'],
+                     mission['actions'], mission['resources'])
+    mission['resources'] = result['resources']
+    mission['history'].append({'round': mission['round'], **result})
+    if mission['round'] == TOTAL_ROUNDS:
+        mission['phase'] = 'complete'
+        mission['outcome'] = 'saved' if result['resources']['stability'] > 0 and sum(r['success'] for r in mission['history']) >= 3 else 'lost'
+        room['status'] = 'complete'
+        mission['deadline'] = None
+    else:
+        mission['phase'] = 'resolution'
+        mission['deadline'] = time.time() + RESULT_SECONDS
+        mission['expires'] = time.monotonic() + RESULT_SECONDS
+    await broadcast(code)
+
+
+async def run_mission(code):
+    try:
+        while True:
+            await asyncio.sleep(0.1)
+            async with lock:
+                room = rooms.get(code)
+                if not room or room['status'] != 'playing':
+                    return
+                mission = room['mission']
+                if time.monotonic() < mission['expires']:
+                    continue
+                if mission['phase'] == 'action':
+                    await finish_round(code)
+                else:
+                    mission['round'] += 1
+                    open_round(mission)
+                    await broadcast(code)
+    finally:
+        if mission_tasks.get(code) is asyncio.current_task():
+            mission_tasks.pop(code, None)
+
+
+@sio.on('start_game')
+async def start_game(sid, data=None):
+    async with lock:
+        entry = connections.get(sid)
+        if not entry:
+            return {'ok': False, 'error': 'Not in a room'}
+        code, player_id = entry
+        room = rooms[code]
+        if player_id != room['host']:
+            return {'ok': False, 'error': 'Only the host can start the mission'}
+        if room['status'] != 'lobby':
+            return {'ok': False, 'error': 'Mission already started'}
+        players = list(room['players'].values())
+        if not 2 <= len(players) <= 6 or not all(p['online'] and p['ready'] for p in players):
+            return {'ok': False, 'error': 'Mission needs 2–6 connected, ready players'}
+        for index, player in enumerate(players):
+            player['role'] = ROLES[index % len(ROLES)]
+        room['status'] = 'playing'
+        room['mission'] = {'id': secrets.token_urlsafe(12), 'round': 1, 'history': [],
+                           'resources': {'stability': 80, 'energy': 70, 'medical': 60, 'security': 65}}
+        open_round(room['mission'])
+        mission_tasks[code] = asyncio.create_task(run_mission(code))
+        await broadcast(code)
+        return {'ok': True}
+
+
+@sio.on('submit_action')
+async def submit_action(sid, data):
+    async with lock:
+        entry = connections.get(sid)
+        if not entry:
+            return {'ok': False, 'error': 'Not in a room'}
+        code, player_id = entry
+        room = rooms[code]
+        mission = room.get('mission')
+        if not mission or room['status'] != 'playing' or mission['phase'] != 'action':
+            return {'ok': False, 'error': 'Round is closed'}
+        if not isinstance(data, dict) or data.get('missionId') != mission['id'] or type(data.get('round')) is not int or data['round'] != mission['round']:
+            return {'ok': False, 'error': 'Stale or invalid round'}
+        if time.monotonic() >= mission['expires']:
+            await finish_round(code)
+            return {'ok': False, 'error': 'Deadline passed'}
+        if player_id in mission['actions']:
+            return {'ok': False, 'error': 'Action already submitted'}
+        kind = data.get('kind')
+        action = {'kind': kind}
+        if kind == 'support':
+            target = data.get('target')
+            if not isinstance(target, str) or target not in room['players'] or target == player_id:
+                return {'ok': False, 'error': 'Choose a teammate to support'}
+            action['target'] = target
+        elif kind == 'conserve':
+            if data.get('resource') not in ('energy', 'medical', 'security'):
+                return {'ok': False, 'error': 'Choose a valid resource'}
+            action['resource'] = data['resource']
+        elif kind != 'respond':
+            return {'ok': False, 'error': 'Invalid action'}
+        mission['actions'][player_id] = action
+        if len(mission['actions']) == len(room['players']):
+            await finish_round(code)
+        else:
+            await broadcast(code)
+        return {'ok': True}
+
+
+def mission_crisis(room):
+    offset = (room.get('mission_number', 1) - 1) * TOTAL_ROUNDS
+    return CRISES[(offset + room['mission']['round'] - 1) % len(CRISES)]
+
+
+@sio.on('reset_game')
+async def reset_game(sid, data=None):
+    async with lock:
+        entry = connections.get(sid)
+        if not entry:
+            return {'ok': False, 'error': 'Not in a room'}
+        code, player_id = entry
+        room = rooms[code]
+        if room['host'] != player_id:
+            return {'ok': False, 'error': 'Only the host can reset the mission'}
+        if room['status'] != 'complete':
+            return {'ok': False, 'error': 'Finish the current mission first'}
+        if not isinstance(data, dict) or data.get('mode') not in ('restart', 'next'):
+            return {'ok': False, 'error': 'Choose start over or next mission'}
+        if data['mode'] == 'next':
+            if room['mission']['outcome'] != 'saved':
+                return {'ok': False, 'error': 'Save the city to unlock the next mission'}
+            room['mission_number'] = room.get('mission_number', 1) + 1
+        else:
+            room['mission_number'] = 1
+        task = mission_tasks.pop(code, None)
+        if task:
+            task.cancel()
+        room.pop('mission', None)
+        room['status'] = 'lobby'
+        room['players'] = {pid: p for pid, p in room['players'].items() if p['online']}
+        for player in room['players'].values():
+            player['ready'] = False
+            player.pop('role', None)
+        await broadcast(code)
+        return {'ok': True}
+
+
+@sio.on('send_message')
+async def send_message(sid, data):
+    if not isinstance(data, dict) or not isinstance(data.get('text'), str):
+        return {'ok': False, 'error': 'Enter a message'}
+    text = data['text'].strip()
+    if not text or len(text) > 240 or any(ord(c) < 32 and c not in '\n\t' for c in text):
+        return {'ok': False, 'error': 'Messages must contain 1–240 characters'}
+    async with lock:
+        entry = connections.get(sid)
+        if not entry:
+            return {'ok': False, 'error': 'Join a squad to use the radio'}
+        code, player_id = entry
+        room = rooms[code]
+        if room['status'] != 'playing':
+            return {'ok': False, 'error': 'Chat is available only during an active mission'}
+        player = room['players'][player_id]
+        now = time.monotonic()
+        if now - player.get('last_message_at', -float('inf')) < 0.6:
+            return {'ok': False, 'error': 'Wait a moment before sending again'}
+        player['last_message_at'] = now
+        message = {'id': secrets.token_urlsafe(12), 'playerId': player_id,
+                   'name': player['name'], 'leader': player_id == room['host'],
+                   'text': text, 'sentAt': time.time(),
+                   'missionNumber': room.get('mission_number', 1),
+                   'round': room.get('mission', {}).get('round')}
+        room.setdefault('messages', []).append(message)
+        room['messages'] = room['messages'][-50:]
+        await broadcast(code)
+        return {'ok': True, 'messageId': message['id']}
