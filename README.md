@@ -31,20 +31,24 @@ Open http://localhost:5173 in two browser tabs. Create a room in one and join us
 
 Create a room, join from a second browser tab, and ready every player. Only the host sees **Start Mission**, enabled for 2–6 connected, ready players. Roles are assigned in join order: engineer, medic, security, dispatcher (repeated for players five and six).
 
-Each mission uses the first five crises from the eight-scenario engine in a fixed order. Every round allows 45 seconds for one locked action per player:
+Each mission uses five crises from the eight-scenario engine in a deterministic rotating order. Mission 1 begins with Hospital Blackout; Mission 2 begins with Hospital Ransomware. The eight existing scenarios cycle across later missions. Every round allows 45 seconds for one locked action per player:
 - **Respond:** 2 points, plus 1 for matching the crisis specialty.
 - **Support:** 1 point, plus 1 if the chosen teammate responds.
 - **Conserve:** restore 5 of the selected resource, capped at 100.
 
 The server resolves when everyone submits or the deadline expires. Missing actions contribute zero. A successful response meets the points target and pays the crisis resource cost; failure reduces stability. Results remain visible for five seconds before the next round. After five rounds, saving the city requires at least three resolved crises and positive stability.
 
-Disconnects do not pause a mission; the timer continues for missing players. Lobby disconnects clear readiness and block starting. Session recovery, host migration, replay, and room expiry remain future work; refresh and create a new room for a new mission.
+Disconnects do not pause a mission; the timer continues for missing players. Lobby disconnects clear readiness and block starting. After completion, the host can choose **Start over** to return to Mission 1, or **Next mission** after a win to advance the crisis sequence. Both return the squad to the same lobby, clear readiness and roles, remove offline players, and restore starting resources when the host launches again. Everyone must ready up again. Session recovery, host migration, and room expiry remain future work.
 
 ## Socket protocol
 
 The server derives room and identity from the socket, never from client-supplied player IDs. Existing lobby events remain unchanged. New events return `{ok, error?}` acknowledgements:
 - `start_game {}`: host only, lobby only; validates the entire squad.
-- `submit_action {round, kind, target?, resource?}`: current integer round required; validates support target or conserve resource and rejects duplicate/late actions.
+- `submit_action {missionId, round, kind, target?, resource?}`: current mission token and integer round required; validates support target or conserve resource and rejects duplicate/late actions.
+
+`reset_game {mode: "restart" | "next"}` is host-only and completion-only; advancing requires a win.
+
+The responsive city scene highlights the active crisis building and moves named squad markers when submissions arrive. Movement indicates submission, not the private action choice. Reduced-motion preferences disable movement effects.
 
 `room_state` broadcasts include `mission` (null in the lobby), with phase (`action`, `resolution`, `complete`), round, public crisis, shared Unix-seconds deadline, server time, resources, submitted player IDs, result history, and final outcome. Action choices remain private until scoring. Clients display the shared deadline using elapsed monotonic time; only the server accepts actions and advances rounds.
 
@@ -63,7 +67,7 @@ Tests cover scoring, start authorization/readiness/player limits, malformed and 
 ## Next milestones
 1. Secure session recovery, disconnect cleanup, host migration, room expiry.
 2. Browser interaction tests, deployment configuration, and persistence.
-3. Scenario selection, role selection, and replay.
+3. Scenario selection, role selection, richer character animation, and building-specific crisis effects.
 
 ## Security note
 The current starter is for **local development only**. It does not yet implement production-ready authentication, reconnect tokens, room expiration, abuse controls, or CORS configuration. Do not deploy it publicly unchanged.

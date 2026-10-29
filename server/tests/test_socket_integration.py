@@ -44,11 +44,22 @@ async def test_two_clients_complete_mission(monkeypatch):
             await wait_for(lambda: all(s[-1]['mission']['round'] == round_number and
                                       s[-1]['mission']['phase'] == 'action' for s in states))
             for client in clients:
-                assert (await client.call('submit_action', {'round': round_number, 'kind': 'respond'}))['ok']
+                assert (await client.call('submit_action', {'round': round_number, 'kind': 'respond', 'missionId': states[0][-1]['mission']['id']}))['ok']
         await wait_for(lambda: all(s[-1]['status'] == 'complete' for s in states))
         assert states[0][-1]['mission']['history'] == states[1][-1]['mission']['history']
         assert len(states[0][-1]['mission']['history']) == 5
         assert states[0][-1]['mission']['outcome'] == 'saved'
+        old_id = states[0][-1]['mission']['id']
+        assert not (await clients[1].call('reset_game', {'mode': 'next'}))['ok']
+        assert (await clients[0].call('reset_game', {'mode': 'next'}))['ok']
+        await wait_for(lambda: all(s[-1]['status'] == 'lobby' for s in states))
+        assert all(s[-1]['missionNumber'] == 2 for s in states)
+        for client in clients:
+            await client.call('set_ready', {'ready': True})
+        await clients[0].call('start_game', {})
+        await wait_for(lambda: all(s[-1]['status'] == 'playing' for s in states))
+        assert states[0][-1]['mission']['crisis']['key'] == 'ransomware'
+        assert not (await clients[0].call('submit_action', {'missionId': old_id, 'round': 1, 'kind': 'respond'}))['ok']
     finally:
         for client in clients:
             if client.connected:

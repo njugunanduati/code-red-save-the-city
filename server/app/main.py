@@ -47,7 +47,7 @@ def public_room(code):
     return {'code': code, 'status': room['status'], 'players': [
         {'id': p['id'], 'name': p['name'], 'ready': p['ready'], 'online': p['online'], 'host': p['id'] == room['host'], 'role': p.get('role')}
         for p in room['players'].values()
-    ], 'mission': public_mission(room)}
+    ], 'missionNumber': room.get('mission_number', 1), 'mission': public_mission(room)}
 
 async def broadcast(code):
     await sio.emit('room_state', public_room(code), room=code)
@@ -133,8 +133,8 @@ def public_mission(room):
     if not mission:
         return None
     return {
-        'round': mission['round'], 'totalRounds': TOTAL_ROUNDS,
-        'phase': mission['phase'], 'crisis': asdict(CRISES[mission['round'] - 1]),
+        'id': mission['id'], 'number': room.get('mission_number', 1), 'round': mission['round'], 'totalRounds': TOTAL_ROUNDS,
+        'phase': mission['phase'], 'crisis': asdict(mission_crisis(room)),
         'deadline': mission['deadline'], 'serverTime': time.time(),
         'resources': dict(mission['resources']),
         'submitted': list(mission['actions']), 'history': list(mission['history']),
@@ -154,7 +154,7 @@ async def finish_round(code):
     mission = room['mission']
     if mission['phase'] != 'action':
         return
-    result = resolve(CRISES[mission['round'] - 1], room['players'],
+    result = resolve(mission_crisis(room), room['players'],
                      mission['actions'], mission['resources'])
     mission['resources'] = result['resources']
     mission['history'].append({'round': mission['round'], **result})
@@ -188,7 +188,8 @@ async def run_mission(code):
                     open_round(mission)
                     await broadcast(code)
     finally:
-        mission_tasks.pop(code, None)
+        if mission_tasks.get(code) is asyncio.current_task():
+            mission_tasks.pop(code, None)
 
 
 @sio.on('start_game')
@@ -209,7 +210,7 @@ async def start_game(sid, data=None):
         for index, player in enumerate(players):
             player['role'] = ROLES[index % len(ROLES)]
         room['status'] = 'playing'
-        room['mission'] = {'round': 1, 'history': [],
+        room['mission'] = {'id': secrets.token_urlsafe(12), 'round': 1, 'history': [],
                            'resources': {'stability': 80, 'energy': 70, 'medical': 60, 'security': 65}}
         open_round(room['mission'])
         mission_tasks[code] = asyncio.create_task(run_mission(code))
@@ -228,7 +229,7 @@ async def submit_action(sid, data):
         mission = room.get('mission')
         if not mission or room['status'] != 'playing' or mission['phase'] != 'action':
             return {'ok': False, 'error': 'Round is closed'}
-        if not isinstance(data, dict) or type(data.get('round')) is not int or data['round'] != mission['round']:
+        if not isinstance(data, dict) or data.get('missionId') != mission['id'] or type(data.get('round')) is not int or data['round'] != mission['round']:
             return {'ok': False, 'error': 'Stale or invalid round'}
         if time.monotonic() >= mission['expires']:
             await finish_round(code)
@@ -253,4 +254,42 @@ async def submit_action(sid, data):
             await finish_round(code)
         else:
             await broadcast(code)
+        return {'ok': True}
+
+
+def mission_crisis(room):
+    offset = (room.get('mission_number', 1) - 1) * TOTAL_ROUNDS
+    return CRISES[(offset + room['mission']['round'] - 1) % len(CRISES)]
+
+
+@sio.on('reset_game')
+async def reset_game(sid, data=None):
+    async with lock:
+        entry = connections.get(sid)
+        if not entry:
+            return {'ok': False, 'error': 'Not in a room'}
+        code, player_id = entry
+        room = rooms[code]
+        if room['host'] != player_id:
+            return {'ok': False, 'error': 'Only the host can reset the mission'}
+        if room['status'] != 'complete':
+            return {'ok': False, 'error': 'Finish the current mission first'}
+        if not isinstance(data, dict) or data.get('mode') not in ('restart', 'next'):
+            return {'ok': False, 'error': 'Choose start over or next mission'}
+        if data['mode'] == 'next':
+            if room['mission']['outcome'] != 'saved':
+                return {'ok': False, 'error': 'Save the city to unlock the next mission'}
+            room['mission_number'] = room.get('mission_number', 1) + 1
+        else:
+            room['mission_number'] = 1
+        task = mission_tasks.pop(code, None)
+        if task:
+            task.cancel()
+        room.pop('mission', None)
+        room['status'] = 'lobby'
+        room['players'] = {pid: p for pid, p in room['players'].items() if p['online']}
+        for player in room['players'].values():
+            player['ready'] = False
+            player.pop('role', None)
+        await broadcast(code)
         return {'ok': True}
