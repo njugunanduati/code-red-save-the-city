@@ -1063,8 +1063,11 @@ function RoomCode({ code }: { code: string }) {
           className="copy-code"
           onClick={copy}
           aria-label="Copy room code"
+          title={status === "copied" ? "Copied!" : "Copy room code"}
         >
-          {status === "copied" ? "✓ Copied!" : "Copy code"}
+          <svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            {status === "copied" ? <path d="m6 14 5 5L22 8"/> : <><rect x="10" y="3" width="15" height="18" rx="4"/><rect x="3" y="10" width="15" height="15" rx="4" className="copy-icon-front"/></>}
+          </svg>
         </button>
       </div>
       <span className="copy-feedback" role="status">
