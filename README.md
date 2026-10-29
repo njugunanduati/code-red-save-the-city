@@ -7,6 +7,10 @@ A cooperative real-time multiplayer crisis-management browser game. **Current st
 - React + TypeScript + Vite frontend
 - In-memory server-authoritative lobby and mission state
 
+## Publish and share
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the Vercel + Render beta setup and separate-device acceptance checks. Players can open **How to play** from the game header.
+
 ## Run locally
 
 Terminal 1:
@@ -72,8 +76,9 @@ Tests cover scoring, start authorization/readiness/player limits, malformed and 
 
 ## Next milestones
 1. Secure session recovery, disconnect cleanup, host migration, room expiry.
-2. Browser interaction tests, deployment configuration, and persistence.
+2. Hosted separate-device acceptance tests, broader browser coverage, and persistence.
 3. Scenario selection, role selection, richer character animation, and building-specific crisis effects.
 
-## Security note
-The current starter is for **local development only**. It does not yet implement production-ready authentication, reconnect tokens, room expiration, abuse controls, or CORS configuration. Do not deploy it publicly unchanged.
+## Beta hosting limits
+
+Deployment settings cover a controlled multiplayer playtest, with exact frontend origins configured using `ALLOWED_ORIGINS`. This version still lacks production-ready authentication, reconnect tokens, room expiry, and comprehensive abuse controls. Run one Python instance and one worker. Server restarts clear game state; use the deployment guide before sharing with testers.

@@ -1,6 +1,8 @@
 import asyncio
 import secrets
 import string
+import os
+from urllib.parse import urlsplit
 from dataclasses import asdict
 from contextlib import asynccontextmanager
 import time
@@ -25,21 +27,26 @@ async def lifespan(api):
         mission_tasks.clear()
 
 
+def configured_origins(value):
+    origins = [origin.strip().rstrip('/') for origin in value.split(',') if origin.strip()]
+    if not origins:
+        raise ValueError('ALLOWED_ORIGINS must list at least one frontend origin')
+    for origin in origins:
+        parsed = urlsplit(origin)
+        if (parsed.scheme not in ('http', 'https') or not parsed.netloc or
+                '*' in origin or parsed.path or parsed.query or parsed.fragment or parsed.username):
+            raise ValueError('ALLOWED_ORIGINS must contain exact http(s) origins, without paths or wildcards')
+    return origins
+
+
+ALLOWED_ORIGINS = configured_origins(os.environ.get(
+    'ALLOWED_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173'))
 api = FastAPI(title="Code Red API", lifespan=lifespan)
 api.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
-sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins=[
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-])
+sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins=ALLOWED_ORIGINS)
 app = socketio.ASGIApp(sio, other_asgi_app=api)
 rooms = {}
 connections = {}

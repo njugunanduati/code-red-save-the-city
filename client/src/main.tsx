@@ -2,7 +2,12 @@ import React, { useEffect, useState, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { io } from "socket.io-client";
 import "./style.css";
-const socket = io(import.meta.env.VITE_SOCKET_URL || "http://localhost:8000");
+const socketUrl =
+  import.meta.env.VITE_SOCKET_URL ||
+  (import.meta.env.DEV ? "http://localhost:8000" : undefined);
+const socket = io(socketUrl || window.location.origin, {
+  autoConnect: !!socketUrl,
+});
 type Player = {
   id: string;
   name: string;
@@ -941,7 +946,11 @@ function SquadRadio({
         <span className="signal-dot" />
       </div>
       <p className="note">
-        {active ? "Coordinate here, then choose your action. The ★ leader is the room host." : room.status === "complete" ? "Mission complete. Chat is closed; conversation history remains below." : "Chat opens when the host starts the mission."}
+        {active
+          ? "Coordinate here, then choose your action. The ★ leader is the room host."
+          : room.status === "complete"
+            ? "Mission complete. Chat is closed; conversation history remains below."
+            : "Chat opens when the host starts the mission."}
       </p>
       <div
         className="radio-log"
@@ -958,7 +967,9 @@ function SquadRadio({
       >
         {!room.messages?.length && (
           <p className="radio-empty">
-            {active ? "Your channel is open. Try “Team, do you copy?” or ask your leader what to do." : "No mission messages yet."}
+            {active
+              ? "Your channel is open. Try “Team, do you copy?” or ask your leader what to do."
+              : "No mission messages yet."}
           </p>
         )}
         {room.messages?.map((message) => (
@@ -1030,6 +1041,84 @@ function SquadRadio({
     </section>
   );
 }
+function HowToPlay() {
+  return (
+    <details className="how-to-play">
+      <summary>How to play</summary>
+      <div>
+        <h2>Save Meridian City together</h2>
+        <p>
+          Gather 2–6 players on any devices. The host creates a room and shares
+          its code. Everyone joins and selects <strong>I am ready</strong>; the
+          host selects <strong>Start Mission</strong>.
+        </p>
+        <p>
+          Roles are assigned in joining order: engineer, medic, security,
+          dispatcher, then repeated for extra players. A matching specialty
+          strengthens your response.
+        </p>
+        <h3>Five emergencies. One action each round.</h3>
+        <p>
+          You have <strong>45 seconds</strong> to discuss a plan in Live Squad
+          Radio and choose one action. Submitted actions lock. Everyone
+          submitting ends the round early; otherwise it resolves at the
+          deadline. Missing actions contribute nothing.
+        </p>
+        <ul>
+          <li>
+            <strong>Respond:</strong> 2 points, or 3 if your role matches the
+            emergency specialty.
+          </li>
+          <li>
+            <strong>Support:</strong> choose a teammate; earn 1 point, plus 1
+            more if that teammate responds.
+          </li>
+          <li>
+            <strong>Conserve:</strong> restore 5 energy, medical, or security,
+            capped at 100. Adds no response points.
+          </li>
+        </ul>
+        <p>
+          Resolve the emergency by meeting its points target{" "}
+          <strong>and</strong> affording its resource cost. Conserved resources
+          are added before this check. Success spends resources; failure reduces
+          stability. Resources carry between rounds. Results stay visible for
+          five seconds.
+        </p>
+        <p>
+          <strong>Example:</strong> an engineer responding to Hospital Blackout
+          earns 3 points. A medic supporting that engineer earns 2 more.
+          Together they beat its 4-point target, provided the squad has enough
+          energy.
+        </p>
+        <h3>Win and advance</h3>
+        <p>
+          Resolve <strong>at least 3 of 5 emergencies</strong> and finish with
+          stability above zero. Each mission starts with stability 80, energy
+          70, medical 60, and security 65.
+        </p>
+        <p>
+          The host is your ★ leader. Ask for direction or reply “Copy” in the
+          radio. <strong>Chat is not an action</strong> and is available only
+          during the mission, including between rounds. All squad members see
+          messages.
+        </p>
+        <p>
+          After completion the host can <strong>Start over</strong> at Mission
+          1, or choose <strong>Next mission</strong> after a win. Everyone
+          readies up again and resources reset. Later missions cycle through
+          eight crisis scenarios.
+        </p>
+        <p className="note">
+          Beta: keep your tab open. Disconnects do not pause the countdown;
+          refresh recovery and host migration are not available yet. Server
+          restarts clear rooms. If the host disconnects, create a new room for
+          the next game.
+        </p>
+      </div>
+    </details>
+  );
+}
 function RoomCode({ code }: { code: string }) {
   const [status, setStatus] = useState<"idle" | "copied" | "manual">("idle");
   const manual = useRef<HTMLInputElement>(null);
@@ -1065,8 +1154,32 @@ function RoomCode({ code }: { code: string }) {
           aria-label="Copy room code"
           title={status === "copied" ? "Copied!" : "Copy room code"}
         >
-          <svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            {status === "copied" ? <path d="m6 14 5 5L22 8"/> : <><rect x="10" y="3" width="15" height="18" rx="4"/><rect x="3" y="10" width="15" height="15" rx="4" className="copy-icon-front"/></>}
+          <svg
+            width="28"
+            height="28"
+            viewBox="0 0 28 28"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            {status === "copied" ? (
+              <path d="m6 14 5 5L22 8" />
+            ) : (
+              <>
+                <rect x="10" y="3" width="15" height="18" rx="4" />
+                <rect
+                  x="3"
+                  y="10"
+                  width="15"
+                  height="15"
+                  rx="4"
+                  className="copy-icon-front"
+                />
+              </>
+            )}
           </svg>
         </button>
       </div>
@@ -1095,24 +1208,37 @@ function App() {
     [code, setCode] = useState(""),
     [room, setRoom] = useState<Room | null>(null),
     [me, setMe] = useState(""),
-    [error, setError] = useState("");
+    [error, setError] = useState(
+      socketUrl
+        ? ""
+        : "Multiplayer is not configured. The host must set the game server address before publishing.",
+    );
   const [remaining, setRemaining] = useState(45),
     [connected, setConnected] = useState(socket.connected),
     [target, setTarget] = useState(""),
     [resource, setResource] = useState("energy");
   useEffect(() => {
     const onRoom = (r: Room) => setRoom(r),
-      onConnect = () => setConnected(true),
+      onConnect = () => {
+        setConnected(true);
+        setError("");
+      },
       onDisconnect = () => {
         setConnected(false);
         setError(
           "Connection lost. Refresh to join a new lobby. Active missions cannot be rejoined yet.",
         );
       };
+    const onConnectError = () =>
+      setError(
+        "Connecting to the mission server… If it is waking up, please allow a minute. We'll keep trying.",
+      );
+    socket.on("connect_error", onConnectError);
     socket.on("room_state", onRoom);
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     return () => {
+      socket.off("connect_error", onConnectError);
       socket.off("room_state", onRoom);
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
@@ -1177,6 +1303,7 @@ function App() {
           CODE <em>RED</em>
         </h1>
         <p>Save the City · Cooperative Multiplayer</p>
+        <HowToPlay />
       </header>
       {room && (
         <div className="city-column">
