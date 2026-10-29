@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { io } from "socket.io-client";
 import "./style.css";
@@ -39,7 +39,18 @@ type Mission = {
   history: Result[];
   outcome?: string;
 };
+type RadioMessage = {
+  id: string;
+  playerId: string;
+  name: string;
+  leader: boolean;
+  text: string;
+  sentAt: number;
+  missionNumber: number;
+  round: number | null;
+};
 type Room = {
+  messages: RadioMessage[];
   code: string;
   missionNumber: number;
   status: string;
@@ -53,7 +64,9 @@ const districts = [
     y: 185,
     w: 145,
     h: 105,
-    color: "#36cbb2",
+    color: "#3ee0d2",
+    facade: "#fff2b0",
+    side: "#b8bb80",
     icon: "+",
   },
   {
@@ -63,6 +76,8 @@ const districts = [
     w: 125,
     h: 85,
     color: "#f7bb53",
+    facade: "#ffd168",
+    side: "#bd984c",
     icon: "ϟ",
   },
   {
@@ -72,6 +87,8 @@ const districts = [
     w: 135,
     h: 130,
     color: "#a79cff",
+    facade: "#4eafd3",
+    side: "#266f9b",
     icon: "⌁",
   },
   {
@@ -81,12 +98,17 @@ const districts = [
     w: 150,
     h: 75,
     color: "#69c9fa",
+    facade: "#e8e9cb",
+    side: "#9caeaa",
     icon: "◉",
   },
 ];
 // Orthographic isometric projection; height stays vertical on screen.
 function project(x: number, y: number, z = 0) {
-  return { x: 360 + (x - y) * 0.54, y: 105 + (x + y) * 0.31 - z };
+  return {
+    x: 360 + (x - 355) * (0.38 + y / 650),
+    y: 210 + y * 0.48 - z * (0.55 + y / 1000),
+  };
 }
 function face(points: number[][]) {
   return points
@@ -151,7 +173,7 @@ function CityBuilding({
           [x + w, y + d, h],
           [x, y + d, h],
         ])}
-        fill="url(#wall-front)"
+        fill={b.facade}
         stroke="#517082"
         strokeWidth=".7"
       />
@@ -162,12 +184,18 @@ function CityBuilding({
           [x + w, y + d, h],
           [x + w, y, h],
         ])}
-        fill="url(#wall-side)"
+        fill={b.side}
         stroke="#354e60"
         strokeWidth=".7"
       />
-      {[0, 1, 2].map((row) =>
-        [0, 1, 2, 3].map((col) => (
+      {Array.from(
+        { length: Math.max(1, Math.floor((h - 10) / 25)) },
+        (_, i) => i,
+      ).map((row) =>
+        Array.from(
+          { length: Math.max(1, Math.floor((w - 10) / 29)) },
+          (_, i) => i,
+        ).map((col) => (
           <polygon
             key={`${row}:${col}`}
             points={face([
@@ -176,7 +204,7 @@ function CityBuilding({
               [x + 25 + col * 29, y + d + 0.5, 29 + row * 25],
               [x + 12 + col * 29, y + d + 0.5, 29 + row * 25],
             ])}
-            fill={row * 25 + 29 < h - 5 ? color : "transparent"}
+            fill={row * 25 + 29 < h - 5 ? "#226885" : "transparent"}
             opacity={col % 3 === 0 ? 0.3 : 0.8}
           />
         )),
@@ -201,7 +229,7 @@ function CityBuilding({
           [x + w, y + d, h],
           [x, y + d, h],
         ])}
-        fill="url(#roof-light)"
+        fill="#fff2cd"
         stroke="#8499a3"
         strokeWidth="1"
       />
@@ -212,7 +240,7 @@ function CityBuilding({
           [x + w - 7, y + d - 7, h + 1],
           [x + 7, y + d - 7, h + 1],
         ])}
-        fill="#20394b"
+        fill="#b7cbc4"
         stroke={color}
         strokeOpacity=".5"
       />
@@ -266,7 +294,10 @@ function CityBuilding({
         x={label.x}
         y={label.y}
         textAnchor="middle"
-        fill={color}
+        fill="#174959"
+        stroke="#f8f4d4"
+        strokeWidth="3"
+        paintOrder="stroke"
         fontSize="9"
         fontWeight="bold"
         letterSpacing=".7"
@@ -319,6 +350,13 @@ function SquadActor({
   const roadStart = project(355, 555),
     roadEnd = project(355, destination.y + 110 + Math.floor(index / 3) * 35);
   const color = districts[index % 4].color;
+  const words = (speech || "").replace(/\s+/g, " ").split(" ");
+  let firstLine = "";
+  while (words.length && (firstLine + " " + words[0]).trim().length <= 26)
+    firstLine = (firstLine + " " + words.shift()).trim();
+  if (!firstLine && words.length) firstLine = words.shift()!.slice(0, 25) + "…";
+  const rest = words.join(" ");
+  const secondLine = rest.length > 26 ? rest.slice(0, 25) + "…" : rest;
   return (
     <g
       className={`city-actor ${dispatched ? "actor-deployed" : "actor-home"}`}
@@ -384,10 +422,10 @@ function SquadActor({
             fontSize="10"
             fontWeight="700"
           >
-            {speech.split("|")[0]}
+            {firstLine}
           </text>
           <text x="0" y="-39" textAnchor="middle" fill="#193c46" fontSize="10">
-            {speech.split("|")[1] || ""}
+            {secondLine}
           </text>
         </g>
       )}
@@ -396,36 +434,13 @@ function SquadActor({
 }
 function CityView({ room }: { room: Room }) {
   const m = room.mission;
-  const [radioTurn, setRadioTurn] = useState(0);
-  const online = room.players.filter((p) => p.online);
-  const radioKey = `${m?.id}:${m?.round}:${m?.phase}:${m?.submitted.join(",")}:${online.map((p) => p.id).join(",")}`;
+  const [visibleMessage, setVisibleMessage] = useState<RadioMessage>();
+  const latestMessage = room.messages?.[room.messages.length - 1];
   useEffect(() => {
-    setRadioTurn(0);
-    const timer = setInterval(() => setRadioTurn((turn) => turn + 1), 4500);
-    return () => clearInterval(timer);
-  }, [radioKey]);
-  const speaker = online[radioTurn % Math.max(1, online.length)];
-  const teammate = online[(radioTurn + 1) % Math.max(1, online.length)];
-  const latest = m?.history[m.history.length - 1];
-  const callout = !m
-    ? radioTurn % 2 === 0
-      ? "Radio check.|Squad, do you copy?"
-      : "Loud and clear.|Standing by at HQ."
-    : m.phase === "complete"
-      ? m.outcome === "saved"
-        ? "City secured!|Great work, team."
-        : "Regroup at HQ.|We'll try again together."
-      : m.phase === "resolution"
-        ? latest?.success
-          ? "Emergency contained.|Nice teamwork!"
-          : "We need to regroup.|Stay with me, squad."
-        : speaker && m.submitted.includes(speaker.id)
-          ? radioTurn % 2 === 0
-            ? "Orders confirmed.|Team, keep me updated."
-            : "I'm in position.|Stay on the radio."
-          : radioTurn % 2 === 0
-            ? "New emergency.|Team, check your orders."
-            : "Copy that.|Ready when you are.";
+    setVisibleMessage(latestMessage);
+    const timer = setTimeout(() => setVisibleMessage(undefined), 10000);
+    return () => clearTimeout(timer);
+  }, [latestMessage?.id]);
   const active = !m
     ? -1
     : ["blackout", "surge", "ransomware"].includes(m.crisis.key)
@@ -454,9 +469,17 @@ function CityView({ room }: { room: Room }) {
       <svg
         viewBox="0 0 720 580"
         role="img"
-        aria-label={`City map. ${m ? m.crisis.title : "Squad at dispatch headquarters"}`}
+        aria-label={`Daytime city boulevard. ${m ? m.crisis.title : "Squad at dispatch headquarters"}`}
       >
         <defs>
+          <linearGradient id="day-sky" x2="0" y2="1">
+            <stop stopColor="#29bce5" />
+            <stop offset="1" stopColor="#c4f5ec" />
+          </linearGradient>
+          <linearGradient id="day-grass" x2="0" y2="1">
+            <stop stopColor="#abd86f" />
+            <stop offset="1" stopColor="#70b856" />
+          </linearGradient>
           <linearGradient id="wall-front" x2="0" y2="1">
             <stop stopColor="#43627a" />
             <stop offset="1" stopColor="#1a3449" />
@@ -470,12 +493,12 @@ function CityView({ room }: { room: Room }) {
             <stop offset="1" stopColor="#4e687b" />
           </linearGradient>
           <linearGradient id="ground-light" x2="0" y2="1">
-            <stop stopColor="#2a4b50" />
-            <stop offset="1" stopColor="#172f3f" />
+            <stop stopColor="#adc291" />
+            <stop offset="1" stopColor="#94b77a" />
           </linearGradient>
           <radialGradient id="tree-light" cx=".3" cy=".2">
-            <stop stopColor="#62977b" />
-            <stop offset="1" stopColor="#234c46" />
+            <stop stopColor="#b8e843" />
+            <stop offset="1" stopColor="#4a9f34" />
           </radialGradient>
           <pattern
             id="grid"
@@ -498,6 +521,38 @@ function CityView({ room }: { room: Room }) {
             <feDropShadow dx="0" dy="12" stdDeviation="8" floodOpacity=".4" />
           </filter>
         </defs>
+        <rect width="720" height="580" fill="url(#day-sky)" />
+        <g fill="#f1fff6" opacity=".65">
+          <ellipse cx="120" cy="78" rx="42" ry="10" />
+          <ellipse cx="142" cy="71" rx="22" ry="15" />
+          <ellipse cx="570" cy="117" rx="44" ry="9" />
+          <ellipse cx="550" cy="110" rx="22" ry="12" />
+        </g>
+        <circle cx="625" cy="55" r="26" fill="#fff6b1" opacity=".65" />
+        {Array.from({ length: 18 }, (_, i) => {
+          const x = i * 42,
+            height = 40 + ((i * 37) % 100);
+          return (
+            <g key={i} opacity={i % 3 === 0 ? 0.6 : 0.4}>
+              <rect
+                x={x}
+                y={220 - height}
+                width="32"
+                height={height}
+                fill={i % 2 ? "#65b9ca" : "#c7dfbc"}
+              />
+              {[0, 1, 2].map((n) => (
+                <path
+                  key={n}
+                  d={`M${x + 6 + n * 9} ${228 - height}v${height - 15}`}
+                  stroke="#dcf5e6"
+                  strokeWidth="3"
+                />
+              ))}
+            </g>
+          );
+        })}
+        <path d="M355 40v105m-7-20 7-50 8 50" fill="#378da9" stroke="#378da9" />
         <ellipse
           cx="360"
           cy="380"
@@ -524,7 +579,7 @@ function CityView({ room }: { room: Room }) {
             [650, 650, -20],
             [0, 650, -20],
           ])}
-          fill="#203b4c"
+          fill="#8b9c74"
         />
         <polygon
           points={face([
@@ -533,7 +588,7 @@ function CityView({ room }: { room: Room }) {
             [650, 650, -20],
             [650, 0, -20],
           ])}
-          fill="#102838"
+          fill="#7c926c"
         />
         <polygon
           points={face([
@@ -570,7 +625,7 @@ function CityView({ room }: { room: Room }) {
             [395, 650],
             [315, 650],
           ])}
-          fill="#657781"
+          fill="#e4dfbd"
         />
         <polygon
           points={face([
@@ -579,7 +634,7 @@ function CityView({ room }: { room: Room }) {
             [650, 350],
             [0, 350],
           ])}
-          fill="#657781"
+          fill="#e4dfbd"
         />
         <polygon
           points={face([
@@ -588,7 +643,7 @@ function CityView({ room }: { room: Room }) {
             [385, 650],
             [325, 650],
           ])}
-          fill="#182c3c"
+          fill="#60717d"
         />
         <polygon
           points={face([
@@ -597,14 +652,14 @@ function CityView({ room }: { room: Room }) {
             [650, 340],
             [0, 340],
           ])}
-          fill="#182c3c"
+          fill="#60717d"
         />
         <polyline
           points={face([
             [355, 0],
             [355, 650],
           ])}
-          stroke="#b2baa9"
+          stroke="#f5f5dc"
           strokeWidth="1.5"
           strokeDasharray="7 10"
         />
@@ -613,7 +668,7 @@ function CityView({ room }: { room: Room }) {
             [0, 310],
             [650, 310],
           ])}
-          stroke="#b2baa9"
+          stroke="#f5f5dc"
           strokeWidth="1.5"
           strokeDasharray="7 10"
         />
@@ -626,7 +681,7 @@ function CityView({ room }: { room: Room }) {
                 [293 + i * 5, 338],
                 [290 + i * 5, 338],
               ])}
-              fill="#a0adb0"
+              fill="#fff9e1"
             />
             <polygon
               points={face([
@@ -635,7 +690,7 @@ function CityView({ room }: { room: Room }) {
                 [383, 363 + i * 5],
                 [327, 363 + i * 5],
               ])}
-              fill="#a0adb0"
+              fill="#fff9e1"
             />
           </g>
         ))}
@@ -647,6 +702,16 @@ function CityView({ room }: { room: Room }) {
           [70, 470],
           [280, 490],
           [610, 600],
+          [285, 40],
+          [420, 50],
+          [285, 130],
+          [420, 135],
+          [285, 215],
+          [420, 215],
+          [290, 405],
+          [415, 500],
+          [285, 590],
+          [420, 590],
         ].map(([x, y], i) => {
           const base = project(x, y),
             top = project(x, y, 30);
@@ -672,16 +737,58 @@ function CityView({ room }: { room: Room }) {
                 fill="url(#tree-light)"
               />
               <ellipse
+                cx={top.x - 12}
+                cy={top.y + 2}
+                rx="12"
+                ry="15"
+                fill="url(#tree-light)"
+              />
+              <ellipse
+                cx={top.x + 12}
+                cy={top.y + 2}
+                rx="13"
+                ry="16"
+                fill="url(#tree-light)"
+              />
+              <ellipse
                 cx={top.x - 4}
                 cy={top.y - 7}
                 rx="8"
                 ry="11"
-                fill="#75ab80"
+                fill="#daf476"
                 opacity=".4"
               />
             </g>
           );
         })}
+        <CityBuilding
+          building={{
+            ...districts[0],
+            name: "",
+            icon: "",
+            x: 12,
+            y: 20,
+            w: 100,
+            h: 195,
+            facade: "#ffe4a0",
+            side: "#cdb467",
+          }}
+          active={false}
+        />
+        <CityBuilding
+          building={{
+            ...districts[2],
+            name: "",
+            icon: "",
+            x: 530,
+            y: 35,
+            w: 105,
+            h: 170,
+            facade: "#3c91b9",
+            side: "#246383",
+          }}
+          active={false}
+        />
         {[0, 1].map((i) => (
           <CityBuilding
             key={i}
@@ -740,6 +847,14 @@ function CityView({ room }: { room: Room }) {
             active={active === i && m?.phase !== "complete"}
           />
         ))}
+        <g
+          transform={`translate(${project(350, 585).x},${project(350, 585).y})`}
+        >
+          <ellipse cy="12" rx="16" ry="8" fill="#0003" />
+          <path d="M-12-13l19 2 9 13-4 15-23-2-5-13Z" fill="#bc3740" />
+          <path d="M-8-9l12 1 7 9-19-2Z" fill="#235970" />
+          <path d="M-10 12l19 2" stroke="#ffb29e" strokeWidth="3" />
+        </g>
         {room.players.map((p, i) => (
           <SquadActor
             key={`${p.id}:${m?.id}:${m?.round}`}
@@ -747,23 +862,17 @@ function CityView({ room }: { room: Room }) {
             index={i}
             mission={m}
             destination={destination}
-            speech={speaker?.id === p.id ? callout : undefined}
+            speech={
+              visibleMessage?.playerId === p.id
+                ? visibleMessage.text
+                : undefined
+            }
           />
         ))}
-        <text x="28" y="555" fill="#7194a6" fontSize="10" letterSpacing="2">
+        <text x="28" y="555" fill="#2b595b" fontSize="10" letterSpacing="2">
           MERIDIAN EMERGENCY RESPONSE NETWORK
         </text>
       </svg>
-      <div className="squad-radio" aria-label="Automatic squad dialogue">
-        <span className="eyebrow">SQUAD RADIO · AUTO CALLOUTS</span>
-        <p role="status" aria-live="polite">
-          <strong>{speaker?.name || "Dispatch"}</strong>
-          {teammate && teammate.id !== speaker?.id
-            ? ` → ${teammate.name}`
-            : " → Squad"}
-          : {callout.replace("|", " ")}
-        </p>
-      </div>
       <div className="city-caption">
         <span className="signal-dot" />
         <p>
@@ -776,6 +885,148 @@ function CityView({ room }: { room: Room }) {
             : "Your city is counting on you. Assemble the squad at dispatch HQ."}
         </p>
       </div>
+    </section>
+  );
+}
+function SquadRadio({
+  room,
+  me,
+  connected,
+}: {
+  room: Room;
+  me: string;
+  connected: boolean;
+}) {
+  const [draft, setDraft] = useState(""),
+    [sending, setSending] = useState(false),
+    [error, setError] = useState("");
+  const log = useRef<HTMLDivElement>(null);
+  const follow = useRef(true);
+  useEffect(() => {
+    if (follow.current && log.current)
+      log.current.scrollTop = log.current.scrollHeight;
+  }, [room.messages?.length, room.messages?.[room.messages.length - 1]?.id]);
+  const transmit = (text: string) => {
+    if (!text.trim() || sending || !connected) return;
+    setSending(true);
+    setError("");
+    socket
+      .timeout(5000)
+      .emit(
+        "send_message",
+        { text },
+        (err: Error | null, response: { ok: boolean; error?: string }) => {
+          setSending(false);
+          if (err || !response?.ok) {
+            setError(
+              response?.error ||
+                "Message could not be confirmed. Check the radio before retrying.",
+            );
+            return;
+          }
+          setDraft("");
+          follow.current = true;
+          if (log.current) log.current.scrollTop = log.current.scrollHeight;
+        },
+      );
+  };
+  return (
+    <section className="radio-panel" aria-label="Squad communication">
+      <div className="radio-header">
+        <div>
+          <span className="eyebrow">LIVE SQUAD RADIO</span>
+          <h3>Talk to your team</h3>
+        </div>
+        <span className="signal-dot" />
+      </div>
+      <p className="note">
+        Coordinate here, then choose your action. The ★ leader is the room host.
+      </p>
+      <div
+        className="radio-log"
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        ref={log}
+        onScroll={() => {
+          const el = log.current;
+          if (el)
+            follow.current =
+              el.scrollHeight - el.scrollTop - el.clientHeight < 35;
+        }}
+      >
+        {!room.messages?.length && (
+          <p className="radio-empty">
+            Your channel is open. Try “Team, do you copy?” or ask your leader
+            what to do.
+          </p>
+        )}
+        {room.messages?.map((message) => (
+          <article
+            className={`radio-message ${message.playerId === me ? "mine" : ""}`}
+            key={message.id}
+          >
+            <div>
+              <strong>
+                {message.name}
+                {message.leader ? " ★ Leader" : ""}
+              </strong>
+              <time dateTime={new Date(message.sentAt * 1000).toISOString()}>
+                {new Date(message.sentAt * 1000).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </time>
+            </div>
+            <p>{message.text}</p>
+          </article>
+        ))}
+      </div>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          transmit(draft);
+        }}
+      >
+        <label htmlFor="radio-message">Message your squad</label>
+        <textarea
+          id="radio-message"
+          value={draft}
+          maxLength={240}
+          rows={2}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Copy. What should we do here?"
+          disabled={!connected || sending}
+        />
+        <div className="radio-compose">
+          <span>{draft.length}/240</span>
+          <button
+            disabled={!connected || sending || !draft.trim()}
+            type="submit"
+          >
+            {sending ? "Sending…" : "Send message"}
+          </button>
+        </div>
+      </form>
+      <div className="radio-quick">
+        <button
+          disabled={!connected || sending}
+          onClick={() => setDraft("Copy, loud and clear.")}
+        >
+          Copy
+        </button>
+        <button
+          disabled={!connected || sending}
+          onClick={() => setDraft("What should we do here?")}
+        >
+          Ask for direction
+        </button>
+      </div>
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
     </section>
   );
 }
@@ -867,7 +1118,12 @@ function App() {
         </h1>
         <p>Save the City · Cooperative Multiplayer</p>
       </header>
-      {room && <CityView room={room} />}
+      {room && (
+        <div className="city-column">
+          <CityView room={room} />
+          <SquadRadio room={room} me={me} connected={connected} />
+        </div>
+      )}
       <section className="panel">
         {!room ? (
           <>

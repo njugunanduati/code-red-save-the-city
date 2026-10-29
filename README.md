@@ -48,9 +48,13 @@ The server derives room and identity from the socket, never from client-supplied
 
 `reset_game {mode: "restart" | "next"}` is host-only and completion-only; advancing requires a win.
 
-The city uses a lightweight SVG isometric projection with extruded buildings, shaded roof/side faces, rooftop equipment, raised terrain, trees, streetlights, and a projected ambulance. Actors and road routes share the same projection; the camera is fixed.
+The daytime city follows a boulevard perspective with a blue sky, distant skyline, colorful raised buildings, tree-lined streets, and traffic, inspired by the supplied city reference. Actors and road routes share its projection; the camera is fixed.
 
-The responsive city scene highlights the active crisis building and moves named squad markers when submissions arrive. Actors walk along road routes with animated steps after submitting. Alternating speech bubbles and a squad-radio panel provide automatic coordination callouts and result reactions. These are scripted character dialogue, not player chat; action choices stay private. Movement indicates submission, not the private action choice. Reduced-motion preferences disable movement effects.
+## Live squad communication
+
+Players type freely into **Live Squad Radio** in the lobby, during rounds, or after a mission. The host is marked **★ Leader**. Use it to ask “Team, do you copy?”, reply “Copy”, request direction, or coordinate a plan before choosing an action. Quick-reply buttons fill the draft for editing; sending chat does not submit a game action. Automatic character dialogue has been removed.
+
+`send_message {text}` accepts 1–240 characters from a connected room member. The server assigns sender identity and leader status, limits sends to one per 0.6 seconds, keeps the latest 50 messages in memory, and broadcasts only to that room. Messages remain across mission resets, with sender names captured at send time. React renders text without HTML interpretation. The latest message appears briefly over its sender's actor; the complete text remains in the radio log. This is squad-wide communication, not private messaging. Reduced-motion preferences disable movement effects.
 
 `room_state` broadcasts include `mission` (null in the lobby), with phase (`action`, `resolution`, `complete`), round, public crisis, shared Unix-seconds deadline, server time, resources, submitted player IDs, result history, and final outcome. Action choices remain private until scoring. Clients display the shared deadline using elapsed monotonic time; only the server accepts actions and advances rounds.
 

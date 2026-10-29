@@ -47,7 +47,7 @@ def public_room(code):
     return {'code': code, 'status': room['status'], 'players': [
         {'id': p['id'], 'name': p['name'], 'ready': p['ready'], 'online': p['online'], 'host': p['id'] == room['host'], 'role': p.get('role')}
         for p in room['players'].values()
-    ], 'missionNumber': room.get('mission_number', 1), 'mission': public_mission(room)}
+    ], 'messages': list(room.get('messages', [])), 'missionNumber': room.get('mission_number', 1), 'mission': public_mission(room)}
 
 async def broadcast(code):
     await sio.emit('room_state', public_room(code), room=code)
@@ -293,3 +293,32 @@ async def reset_game(sid, data=None):
             player.pop('role', None)
         await broadcast(code)
         return {'ok': True}
+
+
+@sio.on('send_message')
+async def send_message(sid, data):
+    if not isinstance(data, dict) or not isinstance(data.get('text'), str):
+        return {'ok': False, 'error': 'Enter a message'}
+    text = data['text'].strip()
+    if not text or len(text) > 240 or any(ord(c) < 32 and c not in '\n\t' for c in text):
+        return {'ok': False, 'error': 'Messages must contain 1–240 characters'}
+    async with lock:
+        entry = connections.get(sid)
+        if not entry:
+            return {'ok': False, 'error': 'Join a squad to use the radio'}
+        code, player_id = entry
+        room = rooms[code]
+        player = room['players'][player_id]
+        now = time.monotonic()
+        if now - player.get('last_message_at', -float('inf')) < 0.6:
+            return {'ok': False, 'error': 'Wait a moment before sending again'}
+        player['last_message_at'] = now
+        message = {'id': secrets.token_urlsafe(12), 'playerId': player_id,
+                   'name': player['name'], 'leader': player_id == room['host'],
+                   'text': text, 'sentAt': time.time(),
+                   'missionNumber': room.get('mission_number', 1),
+                   'round': room.get('mission', {}).get('round')}
+        room.setdefault('messages', []).append(message)
+        room['messages'] = room['messages'][-50:]
+        await broadcast(code)
+        return {'ok': True, 'messageId': message['id']}
