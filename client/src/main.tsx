@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { io } from "socket.io-client";
 import "./style.css";
+import { VictoryCelebration } from "./VictoryCelebration";
 const socketUrl =
   import.meta.env.VITE_SOCKET_URL ||
   (import.meta.env.DEV ? "http://localhost:8000" : undefined);
@@ -1473,13 +1474,22 @@ function App() {
                     </>
                   ) : (
                     <>
-                      <h3>
-                        {m.phase === "complete"
-                          ? m.outcome === "saved"
-                            ? "City saved!"
-                            : "City lost"
-                          : "Round resolved"}
-                      </h3>
+                      {m.phase === "complete" && m.outcome === "saved" ? (
+                        <VictoryCelebration
+                          key={m.id}
+                          mission={m.number}
+                          resolved={
+                            m.history.filter((result) => result.success).length
+                          }
+                          total={m.totalRounds}
+                        />
+                      ) : (
+                        <h3>
+                          {m.phase === "complete"
+                            ? "City lost"
+                            : "Round resolved"}
+                        </h3>
+                      )}
                       {m.phase === "resolution" && (
                         <p>Next emergency in {remaining}s</p>
                       )}
