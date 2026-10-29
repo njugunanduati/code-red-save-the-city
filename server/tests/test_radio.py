@@ -42,3 +42,15 @@ async def test_radio_retains_bounded_history_through_reset():
     assert len(game.public_room(code)['messages']) == 50
     await game.disconnect('1')
     assert not (await game.send_message('1', {'text': 'offline'}))['ok']
+
+
+@pytest.mark.asyncio
+async def test_server_lifespan_owns_lock_and_cleans_tasks():
+    import asyncio
+    old_lock = game.lock
+    async with game.lifespan(game.api):
+        assert game.lock is not old_lock
+        task = asyncio.create_task(asyncio.sleep(60))
+        game.mission_tasks['test'] = task
+    assert task.cancelled()
+    assert game.mission_tasks == {}

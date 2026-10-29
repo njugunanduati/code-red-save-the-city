@@ -2,6 +2,7 @@ import asyncio
 import secrets
 import string
 from dataclasses import asdict
+from contextlib import asynccontextmanager
 import time
 from .game_engine import CRISES, resolve
 from fastapi import FastAPI
@@ -9,7 +10,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import socketio
 
-api = FastAPI(title="Code Red API")
+@asynccontextmanager
+async def lifespan(api):
+    global lock
+    # Python 3.9 locks can bind to the loop in which they are constructed.
+    lock = asyncio.Lock()
+    try:
+        yield
+    finally:
+        tasks = list(mission_tasks.values())
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        mission_tasks.clear()
+
+
+api = FastAPI(title="Code Red API", lifespan=lifespan)
 api.add_middleware(
     CORSMiddleware,
     allow_origins=[
